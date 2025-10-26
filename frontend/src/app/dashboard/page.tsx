@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useWeb3 } from '../../contexts/Web3Context';
 import { uploadJsonToIpfs, retrieveJsonFromIpfs } from '../../utils/web3';
 import { getHederaDIDClient } from '../../utils/hederaDID';
+import { config, isDevelopment } from '../../config/app.config';
 import Link from 'next/link';
 
 interface Pet {
@@ -189,14 +190,41 @@ export default function Dashboard() {
       // Extract pet ID from transaction events
       const petId = tx.events?.PetRegistered?.returnValues?.petId || 1;
 
-      // Step 3: For local development, use mock Hedera DID
-      // In production, this would call: await fetch('/api/hedera/create-pet-did', ...)
-      const mockDid = `did:hedera:testnet:${currentAccount.slice(2, 10)}_${Date.now()}`;
-      const mockTopicId = `0.0.${Date.now()}`;
+      // Step 3: Create Hedera DID based on mode
+      let did: string;
+      let topicId: string;
 
-      console.log('Mock Hedera DID created for local development');
-      console.log('DID:', mockDid);
-      console.log('Topic ID:', mockTopicId);
+      if (config.hedera.useMockDID) {
+        // Development mode: Use mock Hedera DID
+        did = `did:hedera:testnet:${currentAccount.slice(2, 10)}_${Date.now()}`;
+        topicId = `0.0.${Date.now()}`;
+        console.log('🔧 Development Mode: Mock Hedera DID created');
+        console.log('DID:', did);
+        console.log('Topic ID:', topicId);
+      } else {
+        // Production mode: Call API to create real Hedera DID
+        console.log('🌐 Production Mode: Creating real Hedera DID...');
+        const response = await fetch('/api/hedera/create-pet-did', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            petId,
+            owner: currentAccount,
+            petData,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to create Hedera DID');
+        }
+
+        const result = await response.json();
+        did = result.did;
+        topicId = result.topicId;
+        console.log('✅ Real Hedera DID created');
+        console.log('DID:', did);
+        console.log('Topic ID:', topicId);
+      }
 
       // Step 4: Link DID to PetIdentity contract (if contract is available)
       if (contracts.petIdentity) {
@@ -205,17 +233,18 @@ export default function Dashboard() {
 
         await contracts.petIdentity.methods
           .createPetDID(
-            mockDid,
+            did,
             petId,
             microchipHash,
             `Dog/${petBreed}`,
             birthTimestamp,
-            mockTopicId
+            topicId
           )
           .send({ from: currentAccount });
       }
 
-      alert(`✅ Pet registered successfully!\n\nPet ID: ${petId}\nIPFS Hash: ${ipfsHash}\nHedera DID: ${mockDid}`);
+      const modeLabel = isDevelopment() ? '(Development Mode)' : '(Production Mode)';
+      alert(`✅ Pet registered successfully! ${modeLabel}\n\nPet ID: ${petId}\nIPFS Hash: ${ipfsHash}\nHedera DID: ${did}`);
       setPetName('');
       setPetBreed('');
       setPetAge('');

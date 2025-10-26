@@ -4,6 +4,7 @@ import PawGuardTokenArtifact from '../artifacts/contracts/PawGuardToken.sol/PawG
 import GuardStableCoinArtifact from '../artifacts/contracts/GuardStableCoin.sol/GuardStableCoin.json';
 import PawPoolArtifact from '../artifacts/contracts/PawPool.sol/PawPool.json';
 import contractAddresses from '../artifacts/contracts/contract-addresses.json';
+import { config } from '../config/app.config';
 
 // Lazy IPFS client initialization
 let ipfsClient: any = null;
@@ -11,9 +12,30 @@ const getIpfsClient = async () => {
   if (typeof window === 'undefined') {
     throw new Error('IPFS is only available on the client side');
   }
+
+  if (config.ipfs.useMock) {
+    // Mock IPFS for testing
+    return {
+      add: async (data: string) => {
+        console.log('📝 Mock IPFS: Storing data', data.substring(0, 50) + '...');
+        return { cid: { toString: () => `mock_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` } };
+      },
+      cat: async function* (hash: string) {
+        console.log('📝 Mock IPFS: Retrieving data for', hash);
+        yield new TextEncoder().encode(JSON.stringify({ name: 'Mock Pet', breed: 'Mock Breed', age: 0 }));
+      }
+    };
+  }
+
   if (!ipfsClient) {
     const { create } = await import('ipfs-http-client');
-    ipfsClient = create({ host: 'localhost', port: 5001, protocol: 'http' });
+    const url = new URL(config.ipfs.apiUrl);
+    ipfsClient = create({
+      host: url.hostname,
+      port: url.port ? parseInt(url.port) : (url.protocol === 'https:' ? 443 : 80),
+      protocol: url.protocol.replace(':', '')
+    });
+    console.log(`🌐 Connected to IPFS at ${config.ipfs.apiUrl}`);
   }
   return ipfsClient;
 };
@@ -38,11 +60,11 @@ export const getWeb3 = (): Promise<Web3> =>
       console.log("Injected web3 detected.");
       resolve(web3);
     }
-    // Fallback to localhost
+    // Fallback to configured RPC
     else {
-      const provider = new Web3.providers.HttpProvider("http://127.0.0.1:8545");
+      const provider = new Web3.providers.HttpProvider(config.blockchain.rpcUrl);
       const web3 = new Web3(provider);
-      console.log("No web3 instance injected, using Local web3.");
+      console.log(`No web3 instance injected, using ${config.blockchain.networkName}.`);
       resolve(web3);
     }
   });
