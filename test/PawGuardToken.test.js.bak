@@ -1,0 +1,97 @@
+import { expect } from "chai";
+import hre from "hardhat";
+const { ethers } = hre;
+
+describe("PawGuardToken", function () {
+    let PawGuardToken;
+    let pawToken;
+    let owner;
+    let addr1;
+    let addr2;
+
+    beforeEach(async function () {
+        [owner, addr1, addr2] = await ethers.getSigners();
+        PawGuardToken = await ethers.getContractFactory("PawGuardToken");
+        pawToken = await PawGuardToken.deploy();
+    });
+
+    describe("Deployment", function () {
+        it("Should set the right owner", async function () {
+            expect(await pawToken.owner()).to.equal(owner.address);
+        });
+
+        it("Should assign the total supply of tokens to the owner", async function () {
+            const ownerBalance = await pawToken.balanceOf(owner.address);
+            expect(await pawToken.totalSupply()).to.equal(ownerBalance);
+        });
+
+        it("Should have correct name and symbol", async function () {
+            expect(await pawToken.name()).to.equal("$PAW");
+            expect(await pawToken.symbol()).to.equal("PAW");
+        });
+
+        it("Should have initial supply of 1,000,000 tokens", async function () {
+            const expectedSupply = ethers.utils.parseEther("1000000");
+            expect(await pawToken.totalSupply()).to.equal(expectedSupply);
+        });
+    });
+
+    describe("Minting", function () {
+        it("Should allow owner to mint new tokens", async function () {
+            const mintAmount = ethers.utils.parseEther("1000");
+            await pawToken.mint(addr1.address, mintAmount);
+            expect(await pawToken.balanceOf(addr1.address)).to.equal(mintAmount);
+        });
+
+        it("Should not allow non-owner to mint tokens", async function () {
+            const mintAmount = ethers.utils.parseEther("1000");
+            await expect(
+                pawToken.connect(addr1).mint(addr2.address, mintAmount)
+            ).to.be.reverted;
+        });
+
+        it("Should increase total supply when minting", async function () {
+            const initialSupply = await pawToken.totalSupply();
+            const mintAmount = ethers.utils.parseEther("1000");
+            await pawToken.mint(addr1.address, mintAmount);
+            expect(await pawToken.totalSupply()).to.equal(initialSupply.add(mintAmount));
+        });
+    });
+
+    describe("Transfers", function () {
+        it("Should transfer tokens between accounts", async function () {
+            const transferAmount = ethers.utils.parseEther("100");
+            await pawToken.transfer(addr1.address, transferAmount);
+            expect(await pawToken.balanceOf(addr1.address)).to.equal(transferAmount);
+
+            await pawToken.connect(addr1).transfer(addr2.address, ethers.utils.parseEther("50"));
+            expect(await pawToken.balanceOf(addr2.address)).to.equal(ethers.utils.parseEther("50"));
+        });
+
+        it("Should fail if sender doesn't have enough tokens", async function () {
+            const initialOwnerBalance = await pawToken.balanceOf(owner.address);
+            await expect(
+                pawToken.connect(addr1).transfer(owner.address, ethers.utils.parseEther("1"))
+            ).to.be.reverted;
+
+            expect(await pawToken.balanceOf(owner.address)).to.equal(initialOwnerBalance);
+        });
+
+        it("Should update balances after transfers", async function () {
+            const initialOwnerBalance = await pawToken.balanceOf(owner.address);
+            const transferAmount = ethers.utils.parseEther("100");
+
+            await pawToken.transfer(addr1.address, transferAmount);
+            await pawToken.transfer(addr2.address, transferAmount);
+
+            const finalOwnerBalance = await pawToken.balanceOf(owner.address);
+            expect(finalOwnerBalance).to.equal(initialOwnerBalance.sub(transferAmount.mul(2)));
+
+            const addr1Balance = await pawToken.balanceOf(addr1.address);
+            expect(addr1Balance).to.equal(transferAmount);
+
+            const addr2Balance = await pawToken.balanceOf(addr2.address);
+            expect(addr2Balance).to.equal(transferAmount);
+        });
+    });
+});
