@@ -28,11 +28,25 @@ const config = {
       url: "http://127.0.0.1:8545",
       chainId: 31337
     },
-    // You can add other networks here, e.g., for Goerli, Sepolia, etc.
-    // goerli: {
-    //   url: process.env.ALCHEMY_GOERLI_URL || "",
-    //   accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    // },
+    // Base Chain Networks
+    "base-sepolia": {
+      url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+      chainId: 84532,
+      timeout: 40000
+    },
+    "base-mainnet": {
+      url: process.env.BASE_MAINNET_RPC_URL || "https://mainnet.base.org",
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+      chainId: 8453,
+      timeout: 40000
+    },
+    // Sepolia Testnet (for reference)
+    sepolia: {
+      url: process.env.SEPOLIA_RPC_URL || "https://eth-sepolia.g.alchemy.com/v2/demo",
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+      chainId: 11155111
+    }
   },
   mocha: {
     timeout: 20000 // 20 seconds

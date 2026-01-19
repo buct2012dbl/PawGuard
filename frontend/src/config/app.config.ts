@@ -2,19 +2,18 @@
  * PawGuard Configuration
  *
  * Environment modes:
- * - development: Uses mock Hedera DID, local IPFS
- * - production: Uses real Hedera DID SDK, production IPFS gateway
+ * - development: Uses local Hardhat network
+ * - production: Uses Base Chain (Ethereum Layer 2)
  */
 
 export type AppMode = 'development' | 'production';
 
 export interface AppConfig {
   mode: AppMode;
-  hedera: {
-    useMockDID: boolean;
-    network: 'testnet' | 'mainnet';
-    operatorId?: string;
-    operatorKey?: string;
+  baseChain: {
+    network: 'base-sepolia' | 'base-mainnet';
+    rpcUrl: string;
+    chainId: number;
   };
   ipfs: {
     useMock: boolean;
@@ -40,9 +39,10 @@ const mode = getMode();
 const configs: Record<AppMode, AppConfig> = {
   development: {
     mode: 'development',
-    hedera: {
-      useMockDID: true,
-      network: 'testnet',
+    baseChain: {
+      network: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      chainId: 31337,
     },
     ipfs: {
       useMock: false,
@@ -57,11 +57,10 @@ const configs: Record<AppMode, AppConfig> = {
   },
   production: {
     mode: 'production',
-    hedera: {
-      useMockDID: false,
-      network: process.env.NEXT_PUBLIC_HEDERA_NETWORK as 'testnet' | 'mainnet' || 'testnet',
-      operatorId: process.env.NEXT_PUBLIC_HEDERA_OPERATOR_ID,
-      operatorKey: process.env.NEXT_PUBLIC_HEDERA_OPERATOR_KEY,
+    baseChain: {
+      network: (process.env.NEXT_PUBLIC_BASE_CHAIN_NETWORK as 'base-sepolia' | 'base-mainnet') || 'base-sepolia',
+      rpcUrl: process.env.NEXT_PUBLIC_BASE_CHAIN_RPC_URL || 'https://base-sepolia-rpc.publicnode.com',
+      chainId: 84532, // Base Sepolia chain ID
     },
     ipfs: {
       useMock: false,
@@ -69,9 +68,9 @@ const configs: Record<AppMode, AppConfig> = {
       gatewayUrl: process.env.NEXT_PUBLIC_IPFS_GATEWAY_URL || 'https://ipfs.io',
     },
     blockchain: {
-      chainId: parseInt(process.env.NEXT_PUBLIC_CHAIN_ID || '11155111'), // Sepolia default
-      rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY',
-      networkName: process.env.NEXT_PUBLIC_NETWORK_NAME || 'Sepolia Testnet',
+      chainId: parseInt(process.env.NEXT_PUBLIC_CHAIN_ID || '84532'), // Base Sepolia default
+      rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || 'https://base-sepolia-rpc.publicnode.com',
+      networkName: process.env.NEXT_PUBLIC_NETWORK_NAME || 'Base Sepolia Testnet',
     },
   },
 };
@@ -89,6 +88,8 @@ export const isProduction = () => config.mode === 'production';
 if (typeof window !== 'undefined') {
   console.log(`🚀 PawGuard running in ${config.mode.toUpperCase()} mode`);
   if (isDevelopment()) {
-    console.log('📝 Using mock Hedera DID and local IPFS');
+    console.log('📝 Using local Hardhat network');
+  } else {
+    console.log(`🔗 Using Base Chain: ${config.baseChain.network}`);
   }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import { useParams, useRouter } from 'next/navigation';
 import { useWeb3 } from '../../../contexts/Web3Context';
 import { retrieveJsonFromIpfs } from '../../../utils/web3';
@@ -44,17 +45,15 @@ export default function PetProfile() {
   const fetchPetDetails = async () => {
     setLoading(true);
     try {
-      // Fetch basic pet info from contract - Web3.js v4 needs explicit await on the promise
-      // The method call returns a promise that resolves to the result
-      const petInfoResult = contracts.petNFT.methods.getPetBasicInfo(petId);
-      const petInfo = await petInfoResult.call();
+      // Fetch basic pet info from contract using ethers.js
+      const petInfo = await contracts.petNFT.getPetBasicInfo(petId);
       console.log('Pet info returned:', petInfo);
       console.log('Pet info type:', typeof petInfo);
       console.log('Pet info keys:', Object.keys(petInfo));
 
-      // In Web3.js v4, the result is returned as a Result object with numeric string keys
-      const ownerAddress = String(petInfo['0'] || petInfo[0] || currentAccount);
-      const hash = String(petInfo['1'] || petInfo[1] || '');
+      // In ethers.js, the result is returned as an array or object
+      const ownerAddress = String(petInfo[0] || currentAccount);
+      const hash = String(petInfo[1] || '');
 
       console.log('Owner:', ownerAddress);
       console.log('IPFS Hash:', hash);
@@ -80,22 +79,20 @@ export default function PetProfile() {
 
       // Fetch medical records
       try {
-        const recordCountResult = contracts.petNFT.methods.getMedicalHistoryLength(petId);
-        const recordCount = await recordCountResult.call();
+        const recordCount = await contracts.petNFT.getMedicalHistoryLength(petId);
         console.log('Medical record count:', recordCount);
         const records: MedicalRecord[] = [];
 
-        const count = Number(recordCount['0'] || recordCount[0] || recordCount || 0);
+        const count = Number(recordCount || 0);
 
         for (let i = 0; i < count; i++) {
-          const recordResult = contracts.petNFT.methods.getMedicalRecord(petId, i);
-          const record = await recordResult.call();
+          const record = await contracts.petNFT.getMedicalRecord(petId, i);
 
           records.push({
-            vet: String(record['0'] || record[0] || ''),
-            diagnosisIPFSHash: String(record['1'] || record[1] || ''),
-            timestamp: Number(record['2'] || record[2] || 0),
-            verified: !!(record['3'] || record[3])
+            vet: String(record[0] || ''),
+            diagnosisIPFSHash: String(record[1] || ''),
+            timestamp: Number(record[2] || 0),
+            verified: !!(record[3])
           });
         }
 

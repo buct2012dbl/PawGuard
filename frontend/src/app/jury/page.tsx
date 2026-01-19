@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import { useWeb3 } from '../../contexts/Web3Context';
 import { retrieveJsonFromIpfs } from '../../utils/web3';
 
@@ -49,9 +50,8 @@ export default function JuryVoting() {
 
   const fetchPawStake = async () => {
     try {
-      // Web3.js v4 syntax - needs explicit .call()
-      const stakeResult = contracts.pawPool.methods.pawStakes(currentAccount);
-      const stake = await stakeResult.call();
+      // Ethers.js syntax - direct contract call
+      const stake = await contracts.pawPool.pawStakes(currentAccount);
       setPawStake(String(stake));
     } catch (error) {
       console.error('Error fetching PAW stake:', error);
@@ -68,9 +68,8 @@ export default function JuryVoting() {
 
       while (hasMore && claimId <= 100) { // Limit to 100 to prevent infinite loop
         try {
-          // Web3.js v4 syntax - needs explicit .call()
-          const claimResult = contracts.pawPool.methods.claims(claimId);
-          const claim = await claimResult.call();
+          // Ethers.js syntax - direct contract call
+          const claim = await contracts.pawPool.claims(claimId);
 
           // Check if this claim exists (owner is not zero address)
           if (claim.owner === '0x0000000000000000000000000000000000000000') {
@@ -82,15 +81,11 @@ export default function JuryVoting() {
           const isJuror = claim.juryMembers.includes(currentAccount);
 
           // Check if user has voted
-          const hasVotedResult = contracts.pawPool.methods
-            .claimHasVoted(claimId, currentAccount);
-          const hasVoted = await hasVotedResult.call();
+          const hasVoted = await contracts.pawPool.claimHasVoted(claimId, currentAccount);
 
           let voteApproved = null;
           if (hasVoted) {
-            const voteApprovedResult = contracts.pawPool.methods
-              .claimVoteApproved(claimId, currentAccount);
-            voteApproved = await voteApprovedResult.call();
+            voteApproved = await contracts.pawPool.claimVoteApproved(claimId, currentAccount);
           }
 
           const claimData: ClaimForVoting = {
@@ -145,9 +140,11 @@ export default function JuryVoting() {
 
     setLoading(true);
     try {
-      await contracts.pawPool.methods
-        .voteOnClaim(claimId, approve)
-        .send({ from: currentAccount });
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const poolWithSigner = contracts.pawPool.connect(signer);
+      const tx = await poolWithSigner.voteOnClaim(claimId, approve);
+      await tx.wait();
 
       alert(`Vote ${approve ? 'approved' : 'rejected'} successfully!`);
       fetchJuryData();

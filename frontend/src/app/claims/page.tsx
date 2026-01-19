@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import { useWeb3 } from '../../contexts/Web3Context';
 import { uploadJsonToIpfs } from '../../utils/web3';
-import { getHederaDIDClient } from '../../utils/hederaDID';
+import { getBaseChainDIDClient } from '../../utils/baseDID';
 
 interface Claim {
   id: number;
@@ -30,7 +31,12 @@ export default function Claims() {
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [vetVerification, setVetVerification] = useState<VetVerification | null>(null);
-  const [hederaClient] = useState(() => getHederaDIDClient('testnet'));
+  const [baseDIDClient] = useState(() => 
+    getBaseChainDIDClient(
+      process.env.NEXT_PUBLIC_PET_IDENTITY_ADDRESS || '', 
+      'base-sepolia'
+    )
+  );
 
   const currentAccount = accounts[0];
 
@@ -62,10 +68,8 @@ export default function Claims() {
     try {
       // Step 1: Get vet credential from contract (if contract is available)
       if (contracts.veterinarianCredential) {
-        // Web3.js v4 syntax - needs explicit .call()
-        const credentialResult = contracts.veterinarianCredential.methods
-          .getCredential(vetAddress);
-        const credential = await credentialResult.call();
+        // Use ethers.js syntax instead of web3.js
+        const credential = await contracts.veterinarianCredential.getCredential(vetAddress);
 
         if (!credential.did || credential.did === '') {
           setVetVerification({
@@ -75,25 +79,15 @@ export default function Claims() {
           return;
         }
 
-        // Step 2: Verify credential with Hedera
-        const result = await hederaClient.verifyVeterinarianCredential(credential.did);
+        // Step 2: Verify credential with Base Chain
+        const result = await baseDIDClient.verifyVeterinarianCredential(vetAddress);
         setVetVerification(result);
 
-        if (result.isValid) {
-          alert(`✅ Verified Veterinarian\n\nName: Dr. ${result.credential.name}\nLicense: ${result.credential.licenseNumber}\nSpecialty: ${result.credential.specialty}`);
+        if (result.verified) {
+          alert(`✅ Verified Veterinarian\n\nDID: ${result.vetDID}\nVerified at: ${result.verifiedAt}`);
         } else {
-          alert(`❌ ${result.message || 'Invalid or expired credential'}`);
+          alert(`❌ ${result.message || 'Failed to verify veterinarian'}`);
         }
-      } else {
-        // Fallback: Direct API verification
-        const response = await fetch('/api/hedera/verify-vet', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address: vetAddress })
-        });
-
-        const result = await response.json();
-        setVetVerification(result);
       }
     } catch (error) {
       console.error('Error verifying veterinarian:', error);
@@ -130,11 +124,20 @@ export default function Claims() {
       };
 
       const ipfsHash = await uploadJsonToIpfs(claimData);
-      const amount = contracts.web3.utils.toWei(requestedAmount, 'ether');
+      // Use ethers.js to convert to wei
+      const amount = ethers.parseEther(requestedAmount);
 
-      await contracts.pawPool.methods
-        .submitClaim(parseInt(petId), ipfsHash, amount)
-        .send({ from: currentAccount });
+      // Get signer for transaction signing
+      const { getSigner } = await import('../../utils/web3Ethers');
+      const signer = await getSigner();
+      
+      if (!signer) {
+        throw new Error('No signer available. Please connect your wallet.');
+      }
+
+      // Use ethers.js contract with signer for write operations
+      const pawPoolWithSigner = contracts.pawPool.connect(signer);
+      await pawPoolWithSigner.submitClaim(parseInt(petId), ipfsHash, amount);
 
       alert('Claim submitted successfully!');
       setPetId('');
@@ -175,7 +178,7 @@ export default function Claims() {
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-8">
         <h2 className="text-2xl font-bold text-foreground mb-4">Submit New Claim</h2>
         <p className="text-sm text-gray-600 mb-4">
-          Verify veterinarian credentials with Hedera DID before submitting your claim
+          Verify veterinarian credentials on Base Chain before submitting your claim
         </p>
         <form onSubmit={handleSubmitClaim} className="space-y-4">
           <div>
@@ -304,7 +307,7 @@ export default function Claims() {
                     <p className="font-semibold text-foreground">Claim #{claim.id}</p>
                     <p className="text-gray-700">Pet ID: {claim.petId}</p>
                     <p className="text-gray-700">
-                      Requested: {contracts.web3.utils.fromWei(claim.requestedAmount, 'ether')} $GUARD
+                      Requested: {ethers.formatEther(claim.requestedAmount)} $GUARD
                     </p>
                   </div>
                   <span

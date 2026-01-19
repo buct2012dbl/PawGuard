@@ -1,11 +1,12 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import Web3 from 'web3';
-import { getWeb3, getContracts } from '../utils/web3';
+import { ethers } from 'ethers';
+import { getProvider, getSigner, getContracts } from '../utils/web3Ethers';
 
 interface Web3ContextType {
-  web3: Web3 | null;
+  provider: ethers.Provider | null;
+  signer: ethers.Signer | null;
   accounts: string[];
   contracts: any | null;
   loading: boolean;
@@ -13,7 +14,8 @@ interface Web3ContextType {
 }
 
 const Web3Context = createContext<Web3ContextType>({
-  web3: null,
+  provider: null,
+  signer: null,
   accounts: [],
   contracts: null,
   loading: true,
@@ -23,7 +25,8 @@ const Web3Context = createContext<Web3ContextType>({
 export const useWeb3 = () => useContext(Web3Context);
 
 export const Web3Provider = ({ children }: { children: ReactNode }) => {
-  const [web3, setWeb3] = useState<Web3 | null>(null);
+  const [provider, setProvider] = useState<ethers.Provider | null>(null);
+  const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [accounts, setAccounts] = useState<string[]>([]);
   const [contracts, setContracts] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -32,21 +35,28 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const init = async () => {
       try {
-        // Get Web3 instance
-        const web3Instance = await getWeb3();
-        setWeb3(web3Instance);
+        // Get provider (with fallback RPC support)
+        const providerInstance = getProvider();
+        setProvider(providerInstance);
 
-        // Get accounts
-        const accountsList = await web3Instance.eth.getAccounts();
-        setAccounts(accountsList);
+        // Get signer if MetaMask is available
+        const signerInstance = await getSigner();
+        setSigner(signerInstance);
 
-        // Get contracts
-        const contractsInstance = await getContracts(web3Instance);
+        // Get accounts from signer if available
+        if (signerInstance) {
+          const address = await signerInstance.getAddress();
+          setAccounts([address]);
+          console.log(`✅ Connected account: ${address}`);
+        }
+
+        // Get contracts with provider
+        const contractsInstance = await getContracts(providerInstance);
         setContracts(contractsInstance);
 
         setLoading(false);
       } catch (err: any) {
-        console.error('Error initializing Web3:', err);
+        console.error('❌ Error initializing Web3:', err);
         setError(err.message || 'Failed to initialize Web3');
         setLoading(false);
       }
@@ -68,7 +78,7 @@ export const Web3Provider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   return (
-    <Web3Context.Provider value={{ web3, accounts, contracts, loading, error }}>
+    <Web3Context.Provider value={{ provider, signer, accounts, contracts, loading, error }}>
       {children}
     </Web3Context.Provider>
   );

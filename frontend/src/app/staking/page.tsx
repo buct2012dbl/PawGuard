@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import { useWeb3 } from '../../contexts/Web3Context';
 
 export default function Staking() {
@@ -22,21 +23,19 @@ export default function Staking() {
 
   const fetchStakingData = async () => {
     try {
-      // Fetch PAW balance - Web3.js v4 syntax needs explicit .call()
-      const balanceResult = contracts.pawToken.methods.balanceOf(currentAccount);
-      const balance = await balanceResult.call();
+      // Use ethers.js syntax for balance
+      const balance = await contracts.pawToken.balanceOf(currentAccount);
       setPawBalance(String(balance));
 
-      // Fetch current stake
-      const stakeResult = contracts.pawPool.methods.pawStakes(currentAccount);
-      const stake = await stakeResult.call();
+      // Fetch current stake using ethers.js
+      const stake = await contracts.pawPool.pawStakes(currentAccount);
       setPawStake(String(stake));
 
       // Estimate total stakers (this is a simplified approach)
       // In production, you'd want an event listener or contract method for this
       setTotalStakers(0); // Placeholder
     } catch (error) {
-      console.error('Error fetching staking data:', error);
+      console.error('❌ Error fetching staking data:', error);
     }
   };
 
@@ -49,23 +48,32 @@ export default function Staking() {
 
     setLoading(true);
     try {
-      const amount = contracts.web3.utils.toWei(stakeAmount, 'ether');
+      // Convert amount to wei using ethers.js
+      const amount = ethers.parseEther(stakeAmount);
+
+      // Get signer for transactions
+      const { getSigner } = await import('../../utils/web3Ethers');
+      const signer = await getSigner();
+      
+      if (!signer) {
+        throw new Error('No signer available. Please connect your wallet.');
+      }
 
       // First approve the PawPool contract to spend PAW tokens
-      await contracts.pawToken.methods
-        .approve(contracts.pawPool._address, amount)
-        .send({ from: currentAccount });
+      const pawTokenWithSigner = contracts.pawToken.connect(signer);
+      const approveTx = await pawTokenWithSigner.approve(contracts.pawPool.address, amount);
+      await approveTx.wait();
 
       // Then stake the tokens
-      await contracts.pawPool.methods
-        .stakePaw(amount)
-        .send({ from: currentAccount });
+      const pawPoolWithSigner = contracts.pawPool.connect(signer);
+      const stakeTx = await pawPoolWithSigner.stakePaw(amount);
+      await stakeTx.wait();
 
-      alert(`Successfully staked ${stakeAmount} PAW tokens!`);
+      alert(`✅ Successfully staked ${stakeAmount} PAW tokens!`);
       setStakeAmount('');
       fetchStakingData();
     } catch (error: any) {
-      console.error('Error staking PAW:', error);
+      console.error('❌ Error staking PAW:', error);
       alert(`Failed to stake: ${error.message}`);
     } finally {
       setLoading(false);
@@ -79,25 +87,34 @@ export default function Staking() {
       return;
     }
 
-    const amount = contracts.web3.utils.toWei(unstakeAmount, 'ether');
-    const currentStake = parseInt(pawStake);
+    const amount = ethers.parseEther(unstakeAmount);
+    const currentStake = BigInt(pawStake);
 
-    if (parseInt(amount) > currentStake) {
+    if (amount > currentStake) {
       alert('Cannot unstake more than your current stake');
       return;
     }
 
     setLoading(true);
     try {
-      await contracts.pawPool.methods
-        .unstakePaw(amount)
-        .send({ from: currentAccount });
+      // Get signer for transactions
+      const { getSigner } = await import('../../utils/web3Ethers');
+      const signer = await getSigner();
+      
+      if (!signer) {
+        throw new Error('No signer available. Please connect your wallet.');
+      }
 
-      alert(`Successfully unstaked ${unstakeAmount} PAW tokens!`);
+      // Unstake the tokens
+      const pawPoolWithSigner = contracts.pawPool.connect(signer);
+      const unstakeTx = await pawPoolWithSigner.unstakePaw(amount);
+      await unstakeTx.wait();
+
+      alert(`✅ Successfully unstaked ${unstakeAmount} PAW tokens!`);
       setUnstakeAmount('');
       fetchStakingData();
     } catch (error: any) {
-      console.error('Error unstaking PAW:', error);
+      console.error('❌ Error unstaking PAW:', error);
       alert(`Failed to unstake: ${error.message}`);
     } finally {
       setLoading(false);

@@ -58,6 +58,10 @@ contract JuryIdentity is Ownable {
     // Authorized verifiers who can perform Sybil checks
     mapping(address => bool) public isVerifier;
 
+    // Access control for registration
+    mapping(address => bool) public registrationEnabled;  // Addresses allowed to register
+    bool public openRegistration = false;                 // Whether registration is open to all
+
     // Configuration
     uint256 public minimumReputationForJury = 300;     // Minimum reputation to serve on jury
     uint256 public minimumStakeForJury;                // Minimum PAW stake required
@@ -73,6 +77,9 @@ contract JuryIdentity is Ownable {
     event JuryMemberBanned(address indexed member, string reason);
     event JuryMemberReinstated(address indexed member);
     event StakeUpdated(address indexed member, uint256 newAmount);
+    event RegistrationEnabledForAddress(address indexed member);
+    event RegistrationDisabledForAddress(address indexed member);
+    event OpenRegistrationToggled(bool enabled);
 
     constructor(uint256 _minimumStake) Ownable(msg.sender) {
         minimumStakeForJury = _minimumStake;
@@ -88,6 +95,11 @@ contract JuryIdentity is Ownable {
         string memory _did,
         string memory _identityProofIPFSHash
     ) public {
+        // Access control: check if registration is allowed for this address
+        require(
+            openRegistration || registrationEnabled[msg.sender],
+            "JuryIdentity: Registration not allowed for this address"
+        );
         require(juryMembers[msg.sender].memberAddress == address(0), "JuryIdentity: Already registered");
         require(didToAddress[_did] == address(0), "JuryIdentity: DID already exists");
         require(bytes(_did).length > 0, "JuryIdentity: DID cannot be empty");
@@ -367,6 +379,55 @@ contract JuryIdentity is Ownable {
     function setMinimumReputation(uint256 _newMinimum) public onlyOwner {
         require(_newMinimum <= 1000, "JuryIdentity: Reputation must be <= 1000");
         minimumReputationForJury = _newMinimum;
+    }
+
+    /**
+     * @dev Enable registration for a specific address
+     * @param _address Address to enable registration for
+     */
+    function enableRegistrationForAddress(address _address) public onlyOwner {
+        require(_address != address(0), "JuryIdentity: Invalid address");
+        registrationEnabled[_address] = true;
+        emit RegistrationEnabledForAddress(_address);
+    }
+
+    /**
+     * @dev Disable registration for a specific address
+     * @param _address Address to disable registration for
+     */
+    function disableRegistrationForAddress(address _address) public onlyOwner {
+        registrationEnabled[_address] = false;
+        emit RegistrationDisabledForAddress(_address);
+    }
+
+    /**
+     * @dev Enable or disable open registration (allow anyone to register)
+     * @param _enabled True to allow open registration
+     */
+    function toggleOpenRegistration(bool _enabled) public onlyOwner {
+        openRegistration = _enabled;
+        emit OpenRegistrationToggled(_enabled);
+    }
+
+    /**
+     * @dev Batch enable registration for multiple addresses
+     * @param _addresses Array of addresses to enable
+     */
+    function batchEnableRegistration(address[] memory _addresses) public onlyOwner {
+        for (uint256 i = 0; i < _addresses.length; i++) {
+            require(_addresses[i] != address(0), "JuryIdentity: Invalid address");
+            registrationEnabled[_addresses[i]] = true;
+            emit RegistrationEnabledForAddress(_addresses[i]);
+        }
+    }
+
+    /**
+     * @dev Check if an address is eligible to register
+     * @param _address Address to check
+     * @return bool True if eligible to register
+     */
+    function canRegister(address _address) public view returns (bool) {
+        return openRegistration || registrationEnabled[_address];
     }
 
     /**

@@ -75,7 +75,7 @@ async function main() {
     console.log("  1. Start frontend: cd frontend && npm run dev");
     console.log("  2. Open browser: http://localhost:3000");
     console.log("  3. Connect MetaMask to Hardhat Local (Chain ID: 31337)");
-    console.log("  4. Test the UI with mock Hedera DID functionality");
+    console.log("  4. Test the UI with Base Chain DID functionality");
     console.log("");
 
   } catch (error) {

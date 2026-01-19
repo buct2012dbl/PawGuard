@@ -23,6 +23,8 @@ artifacts/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.base-sepolia
+.env.base-mainnet
 
 # IDE and editor files
 .vscode/
