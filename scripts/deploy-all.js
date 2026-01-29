@@ -34,7 +34,8 @@ async function main() {
   // Deploy JuryIdentity
   console.log("\n1.3 Deploying JuryIdentity...");
   const JuryIdentity = await ethers.getContractFactory("JuryIdentity");
-  const juryIdentity = await JuryIdentity.deploy();
+  const minimumStake = ethers.utils.parseEther("100"); // 100 PAW tokens minimum stake
+  const juryIdentity = await JuryIdentity.deploy(minimumStake);
   await juryIdentity.deployed();
   console.log("✅ JuryIdentity deployed to:", juryIdentity.address);
 

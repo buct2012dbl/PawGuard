@@ -3,7 +3,7 @@ import PetNFTArtifact from '../artifacts/contracts/PetNFT.sol/PetNFT.json';
 import PawGuardTokenArtifact from '../artifacts/contracts/PawGuardToken.sol/PawGuardToken.json';
 import GuardStableCoinArtifact from '../artifacts/contracts/GuardStableCoin.sol/GuardStableCoin.json';
 import PawPoolArtifact from '../artifacts/contracts/PawPool.sol/PawPool.json';
-import contractAddresses from '../artifacts/contracts/contract-addresses.json';
+import PetIdentityArtifact from '../artifacts/contracts/PetIdentity.sol/PetIdentity.json';
 import { config } from '../config/app.config';
 
 // Multiple high-quality RPC endpoints for fallback
@@ -206,17 +206,23 @@ export const getContracts = async (provider?: ethers.Provider) => {
     provider = getProvider();
   }
 
-  // Use environment variables first, fall back to contract-addresses.json
-  const petNFTAddress = process.env.NEXT_PUBLIC_PET_NFT_ADDRESS || contractAddresses.PetNFT;
-  const pawTokenAddress = process.env.NEXT_PUBLIC_PAW_TOKEN_ADDRESS || contractAddresses.PawGuardToken;
-  const guardTokenAddress = process.env.NEXT_PUBLIC_GUARD_TOKEN_ADDRESS || contractAddresses.GuardStableCoin;
-  const pawPoolAddress = process.env.NEXT_PUBLIC_PAW_POOL_ADDRESS || contractAddresses.PawPool;
+  // Use environment variables for contract addresses
+  const petNFTAddress: string = process.env.NEXT_PUBLIC_PET_NFT_ADDRESS || '';
+  const pawTokenAddress: string = process.env.NEXT_PUBLIC_PAW_TOKEN_ADDRESS || '';
+  const guardTokenAddress: string = process.env.NEXT_PUBLIC_GUARD_TOKEN_ADDRESS || '';
+  const pawPoolAddress: string = process.env.NEXT_PUBLIC_PAW_POOL_ADDRESS || '';
+  const petIdentityAddress: string = process.env.NEXT_PUBLIC_PET_IDENTITY_ADDRESS || '';
+
+  if (!petNFTAddress || !pawTokenAddress || !guardTokenAddress || !pawPoolAddress || !petIdentityAddress) {
+    throw new Error('Contract addresses not configured in environment variables');
+  }
 
   console.log('📝 Contract Addresses:');
   console.log('  PetNFT:', petNFTAddress);
   console.log('  PAW Token:', pawTokenAddress);
   console.log('  GUARD Token:', guardTokenAddress);
   console.log('  PAW Pool:', pawPoolAddress);
+  console.log('  PetIdentity:', petIdentityAddress);
 
   const petNFTInstance = new ethers.Contract(
     petNFTAddress,
@@ -242,11 +248,18 @@ export const getContracts = async (provider?: ethers.Provider) => {
     provider
   );
 
+  const petIdentityInstance = new ethers.Contract(
+    petIdentityAddress,
+    PetIdentityArtifact.abi,
+    provider
+  );
+
   return {
     petNFT: petNFTInstance,
     pawToken: pawTokenInstance,
     guardToken: guardTokenInstance,
     pawPool: pawPoolInstance,
+    petIdentity: petIdentityInstance,
     provider: provider,
   };
 };

@@ -82,7 +82,11 @@ contract PetNFT is ERC1155, Ownable {
     }
 
     // Function to register a new pet and mint its NFT
-    function registerPet(address _owner, string memory _basicInfoIPFSHash) public onlyOwner returns (uint256) {
+    function registerPet(address _owner, string memory _basicInfoIPFSHash) public returns (uint256) {
+        require(_owner != address(0), "PetNFT: Invalid owner address");
+        require(bytes(_basicInfoIPFSHash).length > 0, "PetNFT: IPFS hash cannot be empty");
+        require(msg.sender == _owner, "PetNFT: Only owner can register their own pet");
+        
         _petIdCounter++;
         uint256 newPetId = _petIdCounter;
 

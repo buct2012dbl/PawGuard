@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Disable React Strict Mode to prevent double-rendering in development
+  reactStrictMode: false,
   // External packages that should not be bundled
   serverExternalPackages: ['ipfs-http-client'],
   // Webpack configuration

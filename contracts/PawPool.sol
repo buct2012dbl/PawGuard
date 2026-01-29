@@ -63,6 +63,7 @@ contract PawPool is Ownable {
 
     // Events
     event PremiumPaid(uint256 indexed petId, address indexed payer, uint256 amount);
+    event PoolDonation(address indexed donor, uint256 amount);
     event ClaimSubmitted(uint256 indexed claimId, uint256 indexed petId, address indexed owner, uint256 requestedAmount);
     event ClaimStatusUpdated(uint256 indexed claimId, ClaimStatus newStatus);
     event JurySelected(uint256 indexed claimId, uint256[] juryMemberIds);
@@ -93,6 +94,25 @@ contract PawPool is Ownable {
     }
 
     // --- Premium & Enrollment ---
+
+    // Generic function to contribute (donate) to the common insurance pool (no pet ID required)
+    function contributeToPool(uint256 _amount) public {
+        require(_amount > 0, "PawPool: Contribution amount must be greater than zero");
+        
+        // Transfer GUARD tokens from contributor to PawPool contract
+        require(guardToken.transferFrom(msg.sender, address(this), _amount), "PawPool: GUARD transfer failed");
+
+        // Distribute contribution to the three-tiered fund pools
+        uint256 immediate = (_amount * 30) / 100;
+        uint256 stable = (_amount * 60) / 100;
+        uint256 risk = _amount - immediate - stable; // Remaining 10% or adjusted for rounding
+
+        immediatePayoutPool += immediate;
+        stableYieldPool += stable;
+        riskReservePool += risk;
+
+        emit PoolDonation(msg.sender, _amount); // Emit donation event for general contributions
+    }
 
     // Internal function to calculate risk score (simplified placeholder)
     function _calculateRiskScore(uint256 _petId) internal view returns (uint256) {

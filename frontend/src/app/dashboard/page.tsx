@@ -22,7 +22,7 @@ interface Pet {
 }
 
 export default function Dashboard() {
-  const { accounts, contracts, loading: web3Loading } = useWeb3();
+  const { accounts, contracts, provider, signer, loading: web3Loading } = useWeb3();
   const [petName, setPetName] = useState('');
   const [petBreed, setPetBreed] = useState('');
   const [petAge, setPetAge] = useState('');
@@ -41,89 +41,39 @@ export default function Dashboard() {
   const currentAccount = accounts[0];
 
   useEffect(() => {
-    if (contracts && currentAccount) {
+    if (currentAccount) {
       fetchPetData();
-      fetchTokenBalances();
+      if (contracts) {
+        fetchTokenBalances();
+      }
     }
   }, [contracts, currentAccount]);
 
   const fetchPetData = async () => {
     try {
-      if (!contracts || !currentAccount) {
-        console.log('⏳ Waiting for contracts or account...');
+      if (!currentAccount) {
+        console.log('⏳ Waiting for account...');
         return;
       }
-      
-      console.log('🔍 Fetching registered pets for account:', currentAccount);
+
+      console.log('🔍 Fetching registered pets from database for account:', currentAccount);
 
       try {
-        // Use ethers.js queryFilter with pagination for large block ranges
-        const petNFT = contracts.petNFT;
-        console.log('📋 PetNFT contract:', petNFT.address);
-        console.log('🔗 Creating filter for PetRegistered events...');
-        
-        const filter = petNFT.filters.PetRegistered(currentAccount);
-        console.log('📊 Filter:', filter);
-        
-        console.log('⏱️ Querying past events with pagination (this may take a moment)...');
-        // Use pagination helper to handle large block ranges
-        const events = await queryFilterWithPagination(petNFT, filter, 0, 'latest');
+        // Fetch pets from database API
+        const response = await fetch(`/api/pets?owner=${currentAccount}`);
 
-        console.log('✅ Found pet events:', events.length);
-
-        // Fetch details for each pet
-        const pets: Pet[] = [];
-        for (const event of events) {
-          try {
-            const petId = event.args?.[0]; // First arg is usually petId
-            if (!petId) {
-              console.warn('⚠️ No petId in event');
-              continue;
-            }
-
-            console.log(`🐕 Fetching pet ID: ${petId}`);
-
-            // Fetch basic info from contract using ethers.js syntax
-            const petInfo = await petNFT.getPetBasicInfo(petId);
-            console.log('📄 Pet info for ID', petId, ':', petInfo);
-
-            // Extract from ethers.js result (array-like)
-            const owner = petInfo[0] || currentAccount;
-            const ipfsHash = petInfo[1] || '';
-
-            // Try to retrieve pet data from IPFS (with timeout)
-            let basicInfo = { name: 'Unknown', breed: 'Unknown', age: 0 };
-            if (ipfsHash) {
-              try {
-                const ipfsData = await Promise.race([
-                  retrieveJsonFromIpfs(ipfsHash),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error('IPFS timeout')), 3000))
-                ]);
-                basicInfo = ipfsData as any;
-                console.log('✅ Loaded IPFS data for pet', petId);
-              } catch (ipfsError) {
-                console.warn('⚠️ Could not fetch IPFS data for pet', petId, ipfsError);
-              }
-            }
-
-            pets.push({
-              id: Number(petId),
-              owner: String(owner),
-              basicInfoIPFSHash: String(ipfsHash),
-              basicInfo
-            });
-          } catch (err) {
-            console.error('❌ Error processing pet event:', err);
-          }
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
         }
 
-        console.log('📦 Loaded pets:', pets);
-        setRegisteredPets(pets);
-      } catch (rpcError: any) {
-        console.error('❌ RPC Error fetching pet data:', rpcError.message);
-        // Set empty pet list but don't fail completely
+        const data = await response.json();
+        console.log('✅ Loaded pets from database:', data.pets);
+
+        setRegisteredPets(data.pets || []);
+      } catch (apiError: any) {
+        console.error('❌ Error fetching pet data from database:', apiError.message);
         setRegisteredPets([]);
-        console.info('ℹ️ No pets found or RPC connection issue - continuing anyway');
+        console.info('ℹ️ No pets found or database connection issue');
       }
     } catch (error) {
       console.error('❌ Unexpected error fetching pet data:', error);
@@ -186,51 +136,15 @@ export default function Dashboard() {
       return;
     }
 
-    // Check if we're on the correct network (Hardhat Local = Chain ID 31337)
-    const chainId = await contracts.web3.eth.getChainId();
+    // Check if we're on the correct network (Base Sepolia = Chain ID 84532)
+    const network = await provider?.getNetwork();
+    const chainId = network?.chainId || 0;
     console.log('Current Chain ID:', chainId);
 
-    if (chainId !== 31337 && Number(chainId) !== 31337) {
-      console.log('Wrong network detected, attempting to switch to Hardhat Local...');
-
-      try {
-        // Try to switch to Hardhat Local network
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x7a69' }], // 31337 in hex
-        });
-
-        // Wait a bit for the switch to complete
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Retry after switching
-        console.log('Network switched, retrying...');
-      } catch (switchError: any) {
-        // This error code indicates that the chain has not been added to MetaMask
-        if (switchError.code === 4902) {
-          try {
-            await window.ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: '0x7a69', // 31337 in hex
-                chainName: 'Hardhat Local',
-                nativeCurrency: {
-                  name: 'Ether',
-                  symbol: 'ETH',
-                  decimals: 18
-                },
-                rpcUrls: ['http://127.0.0.1:8545'],
-              }],
-            });
-          } catch (addError) {
-            alert('Failed to add Hardhat Local network to MetaMask. Please add it manually.');
-            return;
-          }
-        } else {
-          alert(`Failed to switch network: ${switchError.message}`);
-          return;
-        }
-      }
+    if (chainId !== BigInt(84532) && chainId !== BigInt(31337)) {
+      console.log('Wrong network detected. Please connect to Base Sepolia (84532) or Hardhat Local (31337)');
+      alert('Please connect to Base Sepolia testnet or Hardhat Local network');
+      return;
     }
 
     setLoading(true);
@@ -247,12 +161,36 @@ export default function Dashboard() {
       console.log('IPFS Hash:', ipfsHash);
 
       // Step 2: Register pet NFT on blockchain
-      const tx = await contracts.petNFT.methods
-        .registerPet(currentAccount, ipfsHash)
-        .send({ from: currentAccount });
+      if (!signer) {
+        alert('Please connect your wallet first');
+        setLoading(false);
+        return;
+      }
+
+      console.log('Registering pet NFT on blockchain...');
+      const petNFTWithSigner = contracts.petNFT.connect(signer);
+      const registerTx = await petNFTWithSigner.registerPet(currentAccount, ipfsHash);
+      console.log('Waiting for registration transaction:', registerTx.hash);
+      const receipt = await registerTx.wait();
+      console.log('Registration confirmed');
 
       // Extract pet ID from transaction events
-      const petId = tx.events?.PetRegistered?.returnValues?.petId || 1;
+      // For ethers.js v6, we need to parse the logs manually or use contract events
+      let petId = 1;
+      if (receipt?.logs) {
+        for (const log of receipt.logs) {
+          try {
+            const parsed = contracts.petNFT.interface.parseLog(log);
+            if (parsed?.name === 'PetRegistered') {
+              petId = parsed.args[0] || 1;
+              break;
+            }
+          } catch (e) {
+            // Log parsing failed, continue
+          }
+        }
+      }
+      console.log('Pet registered with ID:', petId);
 
       // Step 3: Create Base chain DID
       let did: string;
@@ -270,20 +208,61 @@ export default function Dashboard() {
       console.log('DID:', did);
 
       // Step 4: Link DID to PetIdentity contract (if contract is available)
-      if (contracts.petIdentity) {
-        const microchipHash = contracts.web3.utils.keccak256(microchipId || `CHIP-${Date.now()}`);
-        const birthTimestamp = Math.floor(Date.now() / 1000) - (parseInt(petAge) * 365 * 24 * 60 * 60);
+      if (contracts.petIdentity && signer) {
+        const microchipHash = ethers.keccak256(ethers.toUtf8Bytes(microchipId || `CHIP-${Date.now()}`));
 
-        await contracts.petIdentity.methods
-          .createPetDID(
-            did,
-            petId,
-            microchipHash,
-            `Dog/${petBreed}`,
-            birthTimestamp,
-            ipfsHash
-          )
-          .send({ from: currentAccount });
+        // Calculate birth timestamp (ensure it's positive and reasonable)
+        const ageInSeconds = parseInt(petAge) * 365 * 24 * 60 * 60;
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        const birthTimestamp = Math.max(0, currentTimestamp - ageInSeconds);
+
+        console.log('Birth timestamp calculation:', {
+          currentTimestamp,
+          ageInSeconds,
+          birthTimestamp,
+          petAge: parseInt(petAge)
+        });
+
+        console.log('Creating pet DID on PetIdentity contract...');
+        const petIdentityWithSigner = contracts.petIdentity.connect(signer);
+        const didTx = await petIdentityWithSigner.createPetDID(
+          did,
+          petId,
+          microchipHash,
+          `Dog/${petBreed}`,
+          birthTimestamp,
+          ipfsHash
+        );
+        console.log('Waiting for DID creation transaction:', didTx.hash);
+        await didTx.wait();
+        console.log('✅ Pet DID created on contract');
+      }
+
+      // Step 5: Save pet data to database for fast retrieval
+      try {
+        console.log('💾 Saving pet data to database...');
+        const dbResponse = await fetch('/api/pets', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            petId: Number(petId), // Convert BigInt to number
+            owner: currentAccount,
+            basicInfoIPFSHash: ipfsHash,
+            basicInfo: petData,
+            did: did,
+            transactionHash: receipt?.hash
+          }),
+        });
+
+        if (!dbResponse.ok) {
+          console.warn('⚠️ Failed to save to database, but blockchain registration succeeded');
+        } else {
+          console.log('✅ Pet data saved to database');
+        }
+      } catch (dbError) {
+        console.warn('⚠️ Database save error (non-critical):', dbError);
       }
 
       const modeLabel = isDevelopment() ? '(Development Mode)' : '(Production Mode)';
@@ -412,9 +391,18 @@ export default function Dashboard() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-        <h2 className="text-2xl font-bold text-foreground mb-4">Your Registered Pets</h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-2xl font-bold text-foreground">Your Registered Pets</h2>
+          <button
+            onClick={fetchPetData}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition disabled:bg-gray-400 text-sm"
+          >
+            {loading ? 'Refreshing...' : '🔄 Refresh'}
+          </button>
+        </div>
         {registeredPets.length === 0 ? (
-          <p className="text-gray-600">No pets registered under this account.</p>
+          <p className="text-gray-600">No pets registered under this account. Register one above! 🐕</p>
         ) : (
           <ul className="space-y-3">
             {registeredPets.map((pet) => (
