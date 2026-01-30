@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { useWeb3 } from '../../contexts/Web3Context';
+import { getTransactionUrl } from '../../config/app.config';
 
 export default function Pool() {
   const { accounts, contracts, signer, loading: web3Loading } = useWeb3();
@@ -17,6 +18,9 @@ export default function Pool() {
   const [poolBalance, setPoolBalance] = useState('0');
   const [loading, setLoading] = useState(false);
   const [premiumPayments, setPremiumPayments] = useState<any[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalPayments, setTotalPayments] = useState(0);
 
   const currentAccount = accounts[0];
 
@@ -25,7 +29,7 @@ export default function Pool() {
       fetchPoolBalance();
       fetchPremiumPayments();
     }
-  }, [contracts, currentAccount]);
+  }, [contracts, currentAccount, currentPage, pageSize]);
 
   const fetchPoolBalance = async () => {
     try {
@@ -54,7 +58,7 @@ export default function Pool() {
   const fetchPremiumPayments = async () => {
     try {
       console.log('📋 Fetching premium payments for:', currentAccount);
-      const response = await fetch(`/api/premium-payments?owner=${currentAccount}`);
+      const response = await fetch(`/api/premium-payments?owner=${currentAccount}&page=${currentPage}&pageSize=${pageSize}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch premium payments');
@@ -62,7 +66,8 @@ export default function Pool() {
 
       const data = await response.json();
       setPremiumPayments(data.payments || []);
-      console.log('✅ Loaded premium payments:', data.payments?.length || 0);
+      setTotalPayments(data.total || 0);
+      console.log('✅ Loaded premium payments:', data.payments?.length || 0, 'of', data.total || 0);
     } catch (error) {
       console.error('Error fetching premium payments:', error);
     }
@@ -138,6 +143,7 @@ export default function Pool() {
 
       alert('✅ Pet insurance premium paid successfully!');
       setPremiumAmount('');
+      setCurrentPage(1); // Reset to first page
       fetchPoolBalance();
       fetchPremiumPayments(); // Refresh payment history
     } catch (error: any) {
@@ -396,7 +402,7 @@ export default function Pool() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-blue-600 dark:text-blue-400">
                         <a
-                          href={`https://sepolia.basescan.org/tx/${payment.transaction_hash}`}
+                          href={getTransactionUrl(payment.transaction_hash)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="hover:underline"
@@ -408,6 +414,73 @@ export default function Pool() {
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="bg-gray-50 dark:bg-gray-700 px-6 py-4 flex items-center justify-between border-t border-gray-200">
+              <div className="flex items-center space-x-2">
+                <label htmlFor="pageSize" className="text-sm text-gray-700 dark:text-gray-300">
+                  Show:
+                </label>
+                <select
+                  id="pageSize"
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(parseInt(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="5">5</option>
+                  <option value="10">10</option>
+                  <option value="20">20</option>
+                  <option value="50">50</option>
+                </select>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  per page
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-4">
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Showing {premiumPayments.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to{' '}
+                  {Math.min(currentPage * pageSize, totalPayments)} of {totalPayments} payments
+                </span>
+
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    First
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-3 py-1 text-sm text-gray-700 dark:text-gray-300">
+                    Page {currentPage} of {Math.ceil(totalPayments / pageSize) || 1}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(currentPage + 1)}
+                    disabled={currentPage >= Math.ceil(totalPayments / pageSize)}
+                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(Math.ceil(totalPayments / pageSize))}
+                    disabled={currentPage >= Math.ceil(totalPayments / pageSize)}
+                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Last
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

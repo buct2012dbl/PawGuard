@@ -192,3 +192,30 @@ export async function getPremiumPaymentsByOwner(ownerAddress: string): Promise<P
 
   return data || [];
 }
+
+// Get premium payments by owner with pagination
+export async function getPremiumPaymentsByOwnerWithPagination(
+  ownerAddress: string,
+  page: number = 1,
+  pageSize: number = 10
+): Promise<{ payments: PremiumPaymentRecord[]; total: number }> {
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const { data, error, count } = await supabase
+    .from('premium_payments')
+    .select('*', { count: 'exact' })
+    .eq('owner', ownerAddress.toLowerCase())
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    console.error('Error fetching premium payments:', error);
+    throw error;
+  }
+
+  return {
+    payments: data || [],
+    total: count || 0,
+  };
+}

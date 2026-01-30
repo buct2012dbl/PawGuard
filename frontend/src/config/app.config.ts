@@ -15,6 +15,7 @@ export interface AppConfig {
     network: 'base-sepolia' | 'base-mainnet';
     rpcUrl: string;
     chainId: number;
+    explorerUrl: string;
   };
   ipfs: {
     mode: IpfsMode;
@@ -58,6 +59,7 @@ const configs: Record<AppMode, AppConfig> = {
       network: 'base-sepolia',
       rpcUrl: 'http://127.0.0.1:8545',
       chainId: 31337,
+      explorerUrl: 'http://localhost:8545',
     },
     ipfs: {
       mode: ipfsMode,
@@ -78,6 +80,7 @@ const configs: Record<AppMode, AppConfig> = {
       network: (process.env.NEXT_PUBLIC_BASE_CHAIN_NETWORK as 'base-sepolia' | 'base-mainnet') || 'base-sepolia',
       rpcUrl: process.env.NEXT_PUBLIC_BASE_CHAIN_RPC_URL || 'https://base-sepolia-rpc.publicnode.com',
       chainId: 84532, // Base Sepolia chain ID
+      explorerUrl: process.env.NEXT_PUBLIC_EXPLORER_URL || 'https://sepolia.basescan.org',
     },
     ipfs: {
       mode: ipfsMode,
@@ -124,6 +127,12 @@ export const isDevelopment = () => config.mode === 'development';
 
 // Helper function to check if we're in production mode
 export const isProduction = () => config.mode === 'production';
+
+// Helper function to get blockchain explorer URL
+export const getExplorerUrl = () => config.baseChain.explorerUrl;
+
+// Helper function to get transaction URL
+export const getTransactionUrl = (txHash: string) => `${config.baseChain.explorerUrl}/tx/${txHash}`;
 
 // Log current mode (only in browser)
 if (typeof window !== 'undefined') {

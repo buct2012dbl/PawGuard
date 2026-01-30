@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { savePremiumPayment, getPremiumPaymentsByOwner } from '../../../lib/db';
+import { savePremiumPayment, getPremiumPaymentsByOwnerWithPagination } from '../../../lib/db';
 
-// GET /api/premium-payments?owner=0x...
+// GET /api/premium-payments?owner=0x...&page=1&pageSize=10
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const owner = searchParams.get('owner');
+    const page = parseInt(searchParams.get('page') || '1');
+    const pageSize = parseInt(searchParams.get('pageSize') || '10');
 
     if (!owner) {
       return NextResponse.json(
@@ -14,8 +16,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const payments = await getPremiumPaymentsByOwner(owner);
-    return NextResponse.json({ payments });
+    const { payments, total } = await getPremiumPaymentsByOwnerWithPagination(owner, page, pageSize);
+    return NextResponse.json({ payments, total, page, pageSize });
   } catch (error: any) {
     console.error('Error fetching premium payments:', error);
     return NextResponse.json(
