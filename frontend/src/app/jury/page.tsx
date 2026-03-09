@@ -22,12 +22,20 @@ interface ClaimForVoting {
   diagnosisData?: any;
 }
 
-const ClaimStatus = {
+const ClaimStatus: Record<number, string> = {
   0: 'Pending',
   1: 'In Review',
   2: 'Approved',
   3: 'Rejected',
-  4: 'Refunded'
+  4: 'Refunded',
+};
+
+const statusStyle: Record<number, { bg: string; text: string; dot: string }> = {
+  0: { bg: 'bg-white/10 border border-white/20',            text: 'text-white',       dot: 'bg-white' },
+  1: { bg: 'bg-bitcoin/10 border border-bitcoin/30',        text: 'text-bitcoin',     dot: 'bg-bitcoin animate-pulse' },
+  2: { bg: 'bg-emerald-500/10 border border-emerald-500/30', text: 'text-emerald-400', dot: 'bg-emerald-400' },
+  3: { bg: 'bg-red-500/10 border border-red-500/30',         text: 'text-red-400',     dot: 'bg-red-400' },
+  4: { bg: 'bg-white/5 border border-white/10',              text: 'text-muted',       dot: 'bg-muted' },
 };
 
 export default function JuryVoting() {
@@ -35,7 +43,6 @@ export default function JuryVoting() {
   const [assignedClaims, setAssignedClaims] = useState<ClaimForVoting[]>([]);
   const [allClaims, setAllClaims] = useState<ClaimForVoting[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedClaim, setSelectedClaim] = useState<ClaimForVoting | null>(null);
   const [expandedClaimId, setExpandedClaimId] = useState<number | null>(null);
   const [pawStake, setPawStake] = useState('0');
 
@@ -50,7 +57,6 @@ export default function JuryVoting() {
 
   const fetchPawStake = async () => {
     try {
-      // Ethers.js syntax - direct contract call
       const stake = await contracts.pawPool.pawStakes(currentAccount);
       setPawStake(String(stake));
     } catch (error) {
@@ -61,32 +67,18 @@ export default function JuryVoting() {
   const fetchJuryData = async () => {
     setLoading(true);
     try {
-      // Get total number of claims by trying to fetch claims until we hit an error
       const claimsData: ClaimForVoting[] = [];
       let claimId = 1;
-      let hasMore = true;
 
-      while (hasMore && claimId <= 100) { // Limit to 100 to prevent infinite loop
+      while (claimId <= 100) {
         try {
-          // Ethers.js syntax - direct contract call
           const claim = await contracts.pawPool.claims(claimId);
+          if (claim.owner === '0x0000000000000000000000000000000000000000') break;
 
-          // Check if this claim exists (owner is not zero address)
-          if (claim.owner === '0x0000000000000000000000000000000000000000') {
-            hasMore = false;
-            break;
-          }
-
-          // Check if current user is a juror for this claim
           const isJuror = claim.juryMembers.includes(currentAccount);
-
-          // Check if user has voted
           const hasVoted = await contracts.pawPool.claimHasVoted(claimId, currentAccount);
-
           let voteApproved = null;
-          if (hasVoted) {
-            voteApproved = await contracts.pawPool.claimVoteApproved(claimId, currentAccount);
-          }
+          if (hasVoted) voteApproved = await contracts.pawPool.claimVoteApproved(claimId, currentAccount);
 
           const claimData: ClaimForVoting = {
             claimId,
@@ -101,30 +93,23 @@ export default function JuryVoting() {
             rejectVotes: Number(claim.rejectVotes),
             juryMembers: claim.juryMembers,
             hasVoted,
-            voteApproved
+            voteApproved,
           };
 
-          claimsData.push(claimData);
-
-          // Separate assigned claims
           if (isJuror) {
-            // Try to fetch IPFS data for assigned claims
             try {
-              const diagnosisData = await retrieveJsonFromIpfs(claim.vetDiagnosisIPFSHash);
-              claimData.diagnosisData = diagnosisData;
-            } catch (ipfsError) {
-              console.log('Could not fetch IPFS data for claim', claimId);
-            }
+              claimData.diagnosisData = await retrieveJsonFromIpfs(claim.vetDiagnosisIPFSHash);
+            } catch { /* IPFS data unavailable */ }
           }
 
+          claimsData.push(claimData);
           claimId++;
-        } catch (error) {
-          hasMore = false;
+        } catch {
+          break;
         }
       }
 
-      const assigned = claimsData.filter(c => c.juryMembers.includes(currentAccount));
-      setAssignedClaims(assigned);
+      setAssignedClaims(claimsData.filter(c => c.juryMembers.includes(currentAccount)));
       setAllClaims(claimsData);
     } catch (error) {
       console.error('Error fetching jury data:', error);
@@ -134,9 +119,7 @@ export default function JuryVoting() {
   };
 
   const handleVote = async (claimId: number, approve: boolean) => {
-    if (!window.confirm(`Are you sure you want to ${approve ? 'APPROVE' : 'REJECT'} this claim?`)) {
-      return;
-    }
+    if (!window.confirm(`Are you sure you want to ${approve ? 'APPROVE' : 'REJECT'} this claim?`)) return;
 
     setLoading(true);
     try {
@@ -149,7 +132,6 @@ export default function JuryVoting() {
       alert(`Vote ${approve ? 'approved' : 'rejected'} successfully!`);
       fetchJuryData();
     } catch (error: any) {
-      console.error('Error voting on claim:', error);
       alert(`Failed to vote: ${error.message}`);
     } finally {
       setLoading(false);
@@ -157,268 +139,358 @@ export default function JuryVoting() {
   };
 
   const getVotingTimeRemaining = (submissionTimestamp: number) => {
-    const votingPeriod = 3 * 24 * 60 * 60; // 3 days in seconds
-    const endTime = submissionTimestamp + votingPeriod;
-    const now = Math.floor(Date.now() / 1000);
-    const remaining = endTime - now;
-
+    const endTime = submissionTimestamp + 3 * 24 * 60 * 60;
+    const remaining = endTime - Math.floor(Date.now() / 1000);
     if (remaining <= 0) return 'Voting period ended';
-
-    const days = Math.floor(remaining / (24 * 60 * 60));
-    const hours = Math.floor((remaining % (24 * 60 * 60)) / (60 * 60));
-    const minutes = Math.floor((remaining % (60 * 60)) / 60);
-
-    return `${days}d ${hours}h ${minutes}m remaining`;
+    const d = Math.floor(remaining / 86400);
+    const h = Math.floor((remaining % 86400) / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    return `${d}d ${h}h ${m}m remaining`;
   };
+
+  const isEligible = parseInt(pawStake) > 0;
 
   if (web3Loading) {
     return (
-      <div className="text-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Loading jury dashboard...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="relative w-16 h-16 mx-auto mb-4">
+            <div className="absolute inset-0 rounded-full border-2 border-bitcoin/20"></div>
+            <div className="absolute inset-0 rounded-full border-t-2 border-bitcoin animate-spin"></div>
+          </div>
+          <p className="font-mono text-xs tracking-widest text-muted uppercase">Loading Jury Dashboard...</p>
+        </div>
       </div>
     );
   }
 
   if (!currentAccount) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-        <p className="text-red-600">Please connect your wallet to view jury assignments.</p>
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="bg-surface border border-bitcoin/30 rounded-2xl p-8 text-center max-w-md shadow-glow-orange">
+          <div className="w-12 h-12 bg-bitcoin/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-bitcoin/40">
+            <svg className="w-6 h-6 text-bitcoin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0110 0v4"/>
+            </svg>
+          </div>
+          <h2 className="font-heading font-bold text-xl text-white mb-2">Wallet Required</h2>
+          <p className="text-muted text-sm">Connect your wallet to view jury assignments.</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <h1 className="text-4xl font-bold text-foreground mb-6">Jury Voting Dashboard</h1>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      {/* Header */}
+      <div className="mb-10">
+        <p className="font-mono text-xs tracking-widest text-bitcoin uppercase mb-2">Governance</p>
+        <h1 className="font-heading font-bold text-4xl md:text-5xl text-white">
+          Jury <span className="bg-gradient-to-r from-bitcoin to-gold bg-clip-text text-transparent">Voting</span>
+        </h1>
+      </div>
 
       {/* Juror Status */}
-      <div className="grid md:grid-cols-2 gap-6 mb-8">
-        <div className="bg-purple-50 rounded-lg shadow p-6">
-          <p className="text-sm text-gray-600">Your PAW Stake</p>
-          <p className="text-3xl font-bold text-purple-600 mt-2">
-            {(parseInt(pawStake) / 10 ** 18).toFixed(2)} PAW
+      <div className="grid md:grid-cols-3 gap-5 mb-10">
+        <div className={`bg-surface border rounded-2xl p-6 hover:-translate-y-1 transition-all duration-300 ${
+          isEligible ? 'border-bitcoin/40 hover:border-bitcoin hover:shadow-glow-orange' : 'border-white/10 hover:border-bitcoin/50 hover:shadow-card-hover'
+        }`}>
+          <p className="font-mono text-xs tracking-widest text-muted uppercase mb-3">PAW Staked</p>
+          <p className={`font-heading font-bold text-3xl ${isEligible ? 'bg-gradient-to-r from-bitcoin to-gold bg-clip-text text-transparent' : 'text-white'}`}>
+            {(parseInt(pawStake) / 10 ** 18).toFixed(2)}
           </p>
-          <p className="text-xs text-gray-500 mt-2">
-            {parseInt(pawStake) > 0 ? '✓ Eligible for jury duty' : '✗ Stake PAW to become eligible'}
+          <div className="flex items-center gap-2 mt-2">
+            <div className={`w-1.5 h-1.5 rounded-full ${isEligible ? 'bg-gold animate-pulse' : 'bg-muted'}`}></div>
+            <p className={`font-mono text-xs uppercase tracking-wider ${isEligible ? 'text-gold' : 'text-muted'}`}>
+              {isEligible ? 'Jury Eligible' : 'Stake PAW to Qualify'}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-white/10 rounded-2xl p-6 hover:-translate-y-1 hover:border-bitcoin/50 hover:shadow-card-hover transition-all duration-300">
+          <p className="font-mono text-xs tracking-widest text-muted uppercase mb-3">Assigned Claims</p>
+          <p className="font-heading font-bold text-3xl text-white">{assignedClaims.length}</p>
+          <p className="font-mono text-xs text-muted mt-2 tracking-wider">
+            {assignedClaims.filter(c => !c.hasVoted && c.status === 1).length} pending your vote
           </p>
         </div>
-        <div className="bg-blue-50 rounded-lg shadow p-6">
-          <p className="text-sm text-gray-600">Assigned Claims</p>
-          <p className="text-3xl font-bold text-blue-600 mt-2">
-            {assignedClaims.length}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">
-            {assignedClaims.filter(c => !c.hasVoted && c.status === 1).length} pending your vote
+
+        <div className="bg-surface border border-white/10 rounded-2xl p-6 hover:-translate-y-1 hover:border-bitcoin/50 hover:shadow-card-hover transition-all duration-300">
+          <p className="font-mono text-xs tracking-widest text-muted uppercase mb-3">Total Claims</p>
+          <p className="font-heading font-bold text-3xl text-white">{allClaims.length}</p>
+          <p className="font-mono text-xs text-muted mt-2 tracking-wider">
+            {allClaims.filter(c => c.status === 1).length} in review
           </p>
         </div>
       </div>
 
-      {/* Claims Assigned to You */}
-      <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-4">Your Assigned Claims</h2>
+      {/* Assigned Claims */}
+      <div className="bg-surface border border-white/10 rounded-2xl p-8 mb-8">
+        <h2 className="font-heading font-bold text-2xl text-white mb-6">Your Assigned Claims</h2>
 
         {loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
-            <p className="mt-2 text-gray-600">Loading claims...</p>
+          <div className="py-16 flex flex-col items-center gap-4">
+            <div className="relative w-12 h-12">
+              <div className="absolute inset-0 rounded-full border-2 border-bitcoin/20"></div>
+              <div className="absolute inset-0 rounded-full border-t-2 border-bitcoin animate-spin"></div>
+            </div>
+            <p className="font-mono text-xs tracking-widest text-muted uppercase">Loading Claims...</p>
           </div>
         ) : assignedClaims.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-600">You are not currently assigned to any claims.</p>
-            <p className="text-sm text-gray-500 mt-2">
-              {parseInt(pawStake) === 0
+          <div className="py-16 text-center border border-dashed border-white/10 rounded-xl">
+            <svg className="w-12 h-12 mx-auto mb-4 text-white/20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 3v18M3 6l9-3 9 3M5 10l-2 5h4L5 10zM19 10l-2 5h4l-2-5zM3 21h18"/>
+            </svg>
+            <p className="font-heading font-semibold text-white mb-2">No assigned claims</p>
+            <p className="text-muted text-sm">
+              {!isEligible
                 ? 'Stake PAW tokens to become eligible for jury selection.'
-                : 'Wait for the contract owner to select juries for new claims.'}
+                : 'Wait for the contract owner to select jurors for new claims.'}
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {assignedClaims.map((claim) => (
-              <div
-                key={claim.claimId}
-                className="border-2 border-gray-200 rounded-lg p-6 hover:border-purple-300 transition"
-              >
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-900">Claim #{claim.claimId}</h3>
-                    <p className="text-sm text-gray-600">Pet ID: {claim.petId}</p>
-                  </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                      claim.status === 2
-                        ? 'bg-green-100 text-green-800'
-                        : claim.status === 3
-                        ? 'bg-red-100 text-red-800'
-                        : claim.status === 1
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-gray-100 text-gray-800'
-                    }`}
-                  >
-                    {ClaimStatus[claim.status as keyof typeof ClaimStatus]}
-                  </span>
-                </div>
+          <div className="space-y-5">
+            {assignedClaims.map((claim) => {
+              const ss = statusStyle[claim.status] || statusStyle[0];
+              const totalVotes = claim.approveVotes + claim.rejectVotes;
+              const approvePercent = totalVotes > 0 ? Math.round((claim.approveVotes / totalVotes) * 100) : 0;
 
-                <div className="grid md:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <p className="text-sm text-gray-600">Requested Amount</p>
-                    <p className="text-lg font-semibold text-gray-900">
-                      {(parseInt(claim.requestedPayoutAmount) / 10 ** 18).toFixed(2)} GUARD
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Current Votes</p>
-                    <p className="text-lg font-semibold text-gray-900">
-                      <span className="text-green-600">{claim.approveVotes} Approve</span>
-                      {' / '}
-                      <span className="text-red-600">{claim.rejectVotes} Reject</span>
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Pet Owner</p>
-                    <p className="text-xs font-mono text-gray-700">
-                      {claim.owner.slice(0, 10)}...{claim.owner.slice(-8)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Treating Veterinarian</p>
-                    <p className="text-xs font-mono text-gray-700">
-                      {claim.treatingVet.slice(0, 10)}...{claim.treatingVet.slice(-8)}
-                    </p>
-                  </div>
-                </div>
-
-                {claim.status === 1 && (
-                  <div className="bg-blue-50 rounded p-3 mb-4">
-                    <p className="text-sm font-semibold text-blue-800">
-                      ⏱ {getVotingTimeRemaining(claim.submissionTimestamp)}
-                    </p>
-                  </div>
-                )}
-
-                {/* Diagnosis Details */}
-                <button
-                  onClick={() => setExpandedClaimId(expandedClaimId === claim.claimId ? null : claim.claimId)}
-                  className="text-purple-600 hover:text-purple-800 font-semibold mb-2 flex items-center"
+              return (
+                <div
+                  key={claim.claimId}
+                  className="group bg-black/30 border border-white/10 rounded-2xl overflow-hidden hover:border-bitcoin/50 hover:shadow-card-hover transition-all duration-300"
                 >
-                  {expandedClaimId === claim.claimId ? '▼' : '▶'} View Medical Details
-                </button>
+                  {/* Claim Header */}
+                  <div className="p-6 border-b border-white/5">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="font-heading font-bold text-xl text-white">
+                          Claim <span className="text-bitcoin">#{claim.claimId}</span>
+                        </h3>
+                        <p className="font-mono text-xs text-muted mt-1">Pet ID: {claim.petId}</p>
+                      </div>
+                      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${ss.bg}`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${ss.dot}`}></div>
+                        <span className={`font-mono text-xs tracking-wider uppercase ${ss.text}`}>
+                          {ClaimStatus[claim.status]}
+                        </span>
+                      </div>
+                    </div>
 
-                {expandedClaimId === claim.claimId && (
-                  <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                    <p className="text-sm font-semibold text-gray-700 mb-2">Veterinary Diagnosis:</p>
-                    {claim.diagnosisData ? (
-                      <div className="text-sm text-gray-700">
-                        <pre className="whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
-                          {JSON.stringify(claim.diagnosisData, null, 2)}
-                        </pre>
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div>
+                        <p className="font-mono text-xs text-muted uppercase tracking-wider mb-1">Requested</p>
+                        <p className="font-heading font-semibold text-white">
+                          {(parseInt(claim.requestedPayoutAmount) / 10 ** 18).toFixed(2)}
+                          <span className="text-muted text-xs ml-1">GUARD</span>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-xs text-muted uppercase tracking-wider mb-1">Pet Owner</p>
+                        <p className="font-mono text-xs text-white">
+                          {claim.owner.slice(0, 8)}...{claim.owner.slice(-6)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-xs text-muted uppercase tracking-wider mb-1">Treating Vet</p>
+                        <p className="font-mono text-xs text-white">
+                          {claim.treatingVet.slice(0, 8)}...{claim.treatingVet.slice(-6)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-xs text-muted uppercase tracking-wider mb-1">Jury ({claim.juryMembers.length})</p>
+                        <p className="font-mono text-xs text-bitcoin">You are assigned</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Vote Progress */}
+                  <div className="px-6 py-4 border-b border-white/5">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-mono text-xs text-muted uppercase tracking-wider">Votes</p>
+                      <p className="font-mono text-xs text-muted">
+                        <span className="text-emerald-400">{claim.approveVotes} approve</span>
+                        {' · '}
+                        <span className="text-red-400">{claim.rejectVotes} reject</span>
+                      </p>
+                    </div>
+                    <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-500"
+                        style={{ width: `${approvePercent}%` }}
+                      ></div>
+                    </div>
+
+                    {claim.status === 1 && (
+                      <p className="font-mono text-xs text-bitcoin mt-2 flex items-center gap-1">
+                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        {getVotingTimeRemaining(claim.submissionTimestamp)}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Medical Details Toggle */}
+                  <div className="px-6 py-3 border-b border-white/5">
+                    <button
+                      onClick={() => setExpandedClaimId(expandedClaimId === claim.claimId ? null : claim.claimId)}
+                      className="flex items-center gap-2 font-mono text-xs tracking-wider text-bitcoin hover:text-gold uppercase transition-colors duration-200"
+                    >
+                      <svg
+                        className={`w-4 h-4 transition-transform duration-200 ${expandedClaimId === claim.claimId ? 'rotate-90' : ''}`}
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                      >
+                        <polyline points="9 18 15 12 9 6"/>
+                      </svg>
+                      {expandedClaimId === claim.claimId ? 'Hide' : 'View'} Medical Details
+                    </button>
+
+                    {expandedClaimId === claim.claimId && (
+                      <div className="mt-4 bg-black/40 border border-white/5 rounded-xl p-4">
+                        <p className="font-mono text-xs text-muted uppercase tracking-wider mb-3">Veterinary Diagnosis</p>
+                        {claim.diagnosisData ? (
+                          <pre className="font-mono text-xs text-white/80 whitespace-pre-wrap leading-relaxed">
+                            {JSON.stringify(claim.diagnosisData, null, 2)}
+                          </pre>
+                        ) : (
+                          <div>
+                            <p className="font-mono text-xs text-muted">
+                              IPFS Hash: <span className="text-white">{claim.vetDiagnosisIPFSHash}</span>
+                            </p>
+                            <p className="font-mono text-xs text-white/30 mt-1">
+                              Unable to fetch IPFS data — ensure IPFS daemon is running
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Vote Section */}
+                  <div className="p-6">
+                    {claim.hasVoted ? (
+                      <div className={`flex items-center gap-3 p-4 rounded-xl ${
+                        claim.voteApproved
+                          ? 'bg-emerald-500/10 border border-emerald-500/30'
+                          : 'bg-red-500/10 border border-red-500/30'
+                      }`}>
+                        <svg className={`w-5 h-5 ${claim.voteApproved ? 'text-emerald-400' : 'text-red-400'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d={claim.voteApproved ? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" : "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"}/>
+                        </svg>
+                        <p className={`font-mono text-xs tracking-wider uppercase ${claim.voteApproved ? 'text-emerald-400' : 'text-red-400'}`}>
+                          You voted to {claim.voteApproved ? 'APPROVE' : 'REJECT'} this claim
+                        </p>
+                      </div>
+                    ) : claim.status === 1 ? (
+                      <div className="flex gap-4">
+                        <button
+                          onClick={() => handleVote(claim.claimId, true)}
+                          disabled={loading}
+                          className="flex-1 bg-emerald-500/10 border border-emerald-500/40 hover:bg-emerald-500/20 hover:border-emerald-400 text-emerald-400 font-mono font-semibold tracking-wider uppercase h-12 rounded-full transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                          </svg>
+                          APPROVE
+                        </button>
+                        <button
+                          onClick={() => handleVote(claim.claimId, false)}
+                          disabled={loading}
+                          className="flex-1 bg-red-500/10 border border-red-500/40 hover:bg-red-500/20 hover:border-red-400 text-red-400 font-mono font-semibold tracking-wider uppercase h-12 rounded-full transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                          </svg>
+                          REJECT
+                        </button>
                       </div>
                     ) : (
-                      <div className="text-sm text-gray-600">
-                        <p>IPFS Hash: {claim.vetDiagnosisIPFSHash}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          (Unable to fetch IPFS data - ensure IPFS daemon is running)
+                      <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
+                        <p className="font-mono text-xs text-muted text-center">
+                          Voting not available — Status: {ClaimStatus[claim.status]}
                         </p>
                       </div>
                     )}
                   </div>
-                )}
-
-                {/* Your Vote Status */}
-                {claim.hasVoted ? (
-                  <div className={`rounded-lg p-4 ${
-                    claim.voteApproved ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
-                  }`}>
-                    <p className="font-semibold ${claim.voteApproved ? 'text-green-800' : 'text-red-800'}">
-                      ✓ You voted to {claim.voteApproved ? 'APPROVE' : 'REJECT'} this claim
-                    </p>
-                  </div>
-                ) : claim.status === 1 ? (
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => handleVote(claim.claimId, true)}
-                      disabled={loading}
-                      className="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition disabled:bg-gray-400 font-semibold"
-                    >
-                      ✓ APPROVE
-                    </button>
-                    <button
-                      onClick={() => handleVote(claim.claimId, false)}
-                      disabled={loading}
-                      className="flex-1 bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition disabled:bg-gray-400 font-semibold"
-                    >
-                      ✗ REJECT
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bg-gray-100 rounded-lg p-4">
-                    <p className="text-gray-600">
-                      Voting is not available for this claim (Status: {ClaimStatus[claim.status as keyof typeof ClaimStatus]})
-                    </p>
-                  </div>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* All Claims Overview */}
-      <div className="bg-white rounded-lg shadow-lg p-6">
-        <h2 className="text-2xl font-bold text-gray-800 mb-4">All Claims Overview</h2>
+      <div className="bg-surface border border-white/10 rounded-2xl overflow-hidden">
+        <div className="p-8 border-b border-white/10">
+          <h2 className="font-heading font-bold text-2xl text-white">All Claims Overview</h2>
+          <p className="text-muted text-sm mt-1">{allClaims.length} total claims on-chain</p>
+        </div>
 
         {allClaims.length === 0 ? (
-          <p className="text-gray-600">No claims have been submitted yet.</p>
+          <div className="py-16 text-center">
+            <svg className="w-12 h-12 mx-auto mb-4 text-white/20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+              <line x1="2" y1="20" x2="22" y2="20"/>
+            </svg>
+            <p className="font-heading font-semibold text-white mb-1">No claims submitted yet</p>
+            <p className="text-muted text-sm">All on-chain claims will appear here.</p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full">
+            <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Claim ID</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Pet ID</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Amount (GUARD)</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Votes</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Status</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Jury</th>
+                <tr className="border-b border-white/10">
+                  {['Claim', 'Pet', 'Amount', 'Votes', 'Status', 'Jury'].map((h) => (
+                    <th key={h} className="px-6 py-4 text-left font-mono text-xs tracking-widest text-muted uppercase">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody>
-                {allClaims.map((claim) => (
-                  <tr key={claim.claimId} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 text-sm">#{claim.claimId}</td>
-                    <td className="py-3 px-4 text-sm">{claim.petId}</td>
-                    <td className="py-3 px-4 text-sm">
-                      {(parseInt(claim.requestedPayoutAmount) / 10 ** 18).toFixed(2)}
-                    </td>
-                    <td className="py-3 px-4 text-sm">
-                      <span className="text-green-600">{claim.approveVotes}</span>
-                      {' / '}
-                      <span className="text-red-600">{claim.rejectVotes}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          claim.status === 2
-                            ? 'bg-green-100 text-green-800'
-                            : claim.status === 3
-                            ? 'bg-red-100 text-red-800'
-                            : claim.status === 1
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
-                        {ClaimStatus[claim.status as keyof typeof ClaimStatus]}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-sm">
-                      {claim.juryMembers.includes(currentAccount) ? (
-                        <span className="text-purple-600 font-semibold">You</span>
-                      ) : (
-                        <span className="text-gray-500">{claim.juryMembers.length} jurors</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-white/5">
+                {allClaims.map((claim) => {
+                  const ss = statusStyle[claim.status] || statusStyle[0];
+                  return (
+                    <tr key={claim.claimId} className="hover:bg-white/5 transition-colors duration-150">
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm text-bitcoin">#{claim.claimId}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm text-white">{claim.petId}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm text-white">
+                          {(parseInt(claim.requestedPayoutAmount) / 10 ** 18).toFixed(2)}
+                          <span className="text-muted text-xs ml-1">GUARD</span>
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-xs">
+                          <span className="text-emerald-400">{claim.approveVotes}</span>
+                          <span className="text-muted"> / </span>
+                          <span className="text-red-400">{claim.rejectVotes}</span>
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${ss.bg}`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${ss.dot}`}></div>
+                          <span className={`font-mono text-xs tracking-wider uppercase ${ss.text}`}>
+                            {ClaimStatus[claim.status]}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {claim.juryMembers.includes(currentAccount) ? (
+                          <span className="font-mono text-xs text-bitcoin">You</span>
+                        ) : (
+                          <span className="font-mono text-xs text-muted">{claim.juryMembers.length} jurors</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

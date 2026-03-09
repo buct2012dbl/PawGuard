@@ -5,16 +5,20 @@ import { ethers } from 'ethers';
 import { useWeb3 } from '../../contexts/Web3Context';
 import { getTransactionUrl } from '../../config/app.config';
 
+const inputClass =
+  'w-full bg-black/50 border-b-2 border-white/20 px-4 h-12 text-white text-sm placeholder:text-white/30 focus:border-bitcoin focus:outline-none focus:shadow-[0_10px_20px_-10px_rgba(247,147,26,0.3)] transition-all duration-200';
+
+const labelClass = 'block text-xs font-mono tracking-widest text-muted uppercase mb-2';
+
+const primaryBtn =
+  'w-full bg-gradient-to-r from-bitcoin-dark to-bitcoin text-white font-mono font-semibold tracking-wider uppercase h-12 rounded-full shadow-glow-orange hover:shadow-glow-orange-lg hover:scale-[1.02] transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100';
+
 export default function Pool() {
   const { accounts, contracts, signer, loading: web3Loading } = useWeb3();
-  
-  // Premium state
+
   const [petId, setPetId] = useState('1');
   const [premiumAmount, setPremiumAmount] = useState('');
-  
-  // Donation state
   const [donationAmount, setDonationAmount] = useState('');
-
   const [poolBalance, setPoolBalance] = useState('0');
   const [loading, setLoading] = useState(false);
   const [premiumPayments, setPremiumPayments] = useState<any[]>([]);
@@ -33,23 +37,10 @@ export default function Pool() {
 
   const fetchPoolBalance = async () => {
     try {
-      // Fetch pool balance from contract
       const immediatePool = await contracts.pawPool.immediatePayoutPool();
       const stablePool = await contracts.pawPool.stableYieldPool();
       const riskPool = await contracts.pawPool.riskReservePool();
-
-      // Sum all three pools to get total balance
-      const totalBalance = immediatePool + stablePool + riskPool;
-
-      // Convert from wei to ether for display
-      const balanceInEther = ethers.formatEther(totalBalance);
-      setPoolBalance(balanceInEther);
-
-      console.log('Pool balances:');
-      console.log('- Immediate Payout Pool:', ethers.formatEther(immediatePool), 'GUARD');
-      console.log('- Stable Yield Pool:', ethers.formatEther(stablePool), 'GUARD');
-      console.log('- Risk Reserve Pool:', ethers.formatEther(riskPool), 'GUARD');
-      console.log('- Total Pool Balance:', balanceInEther, 'GUARD');
+      setPoolBalance(ethers.formatEther(immediatePool + stablePool + riskPool));
     } catch (error) {
       console.error('Error fetching pool balance:', error);
     }
@@ -57,100 +48,53 @@ export default function Pool() {
 
   const fetchPremiumPayments = async () => {
     try {
-      console.log('📋 Fetching premium payments for:', currentAccount);
       const response = await fetch(`/api/premium-payments?owner=${currentAccount}&page=${currentPage}&pageSize=${pageSize}`);
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch premium payments');
-      }
-
+      if (!response.ok) throw new Error('Failed to fetch premium payments');
       const data = await response.json();
       setPremiumPayments(data.payments || []);
       setTotalPayments(data.total || 0);
-      console.log('✅ Loaded premium payments:', data.payments?.length || 0, 'of', data.total || 0);
     } catch (error) {
       console.error('Error fetching premium payments:', error);
     }
   };
 
-  // Handle Premium Payment
   const handlePayPremium = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!petId || parseFloat(petId) <= 0) {
-      alert('Please enter a valid pet ID');
-      return;
-    }
-    if (!premiumAmount || parseFloat(premiumAmount) <= 0) {
-      alert('Please enter a valid premium amount');
-      return;
-    }
-
-    if (!signer) {
-      alert('Please connect your wallet first');
-      return;
-    }
+    if (!petId || parseFloat(petId) <= 0) { alert('Please enter a valid pet ID'); return; }
+    if (!premiumAmount || parseFloat(premiumAmount) <= 0) { alert('Please enter a valid premium amount'); return; }
+    if (!signer) { alert('Please connect your wallet first'); return; }
 
     setLoading(true);
     try {
       const amount = ethers.parseEther(premiumAmount);
-      console.log('🔄 Paying premium for pet', petId, ':', premiumAmount, 'GUARD...');
-
-      // First approve the pool contract
       const poolAddress = contracts.pawPool.target;
-      console.log('📝 Approving pool contract to spend GUARD tokens...');
-      console.log('Pool address:', poolAddress);
-      console.log('Amount to approve:', amount.toString());
-
       const guardWithSigner = contracts.guardToken.connect(signer);
       const approveTx = await guardWithSigner.approve(poolAddress, amount);
-      console.log('⏳ Waiting for approval transaction:', approveTx.hash);
       await approveTx.wait();
-      console.log('✅ Approval confirmed');
 
-      // Then pay premium
-      console.log('📝 Paying premium for pet...');
       const poolWithSigner = contracts.pawPool.connect(signer);
       const premiumTx = await poolWithSigner.payPremium(parseInt(petId), amount);
-      console.log('⏳ Waiting for premium transaction:', premiumTx.hash);
       const receipt = await premiumTx.wait();
-      console.log('✅ Premium payment confirmed');
 
-      // Save payment to database
       try {
-        console.log('💾 Saving premium payment to database...');
-        const response = await fetch('/api/premium-payments', {
+        await fetch('/api/premium-payments', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            petId: parseInt(petId),
-            owner: currentAccount,
-            amount: premiumAmount,
-            transactionHash: premiumTx.hash,
-            blockTimestamp: receipt.blockNumber,
+            petId: parseInt(petId), owner: currentAccount, amount: premiumAmount,
+            transactionHash: premiumTx.hash, blockTimestamp: receipt.blockNumber,
           }),
         });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.error('Failed to save payment to database:', errorData);
-        } else {
-          console.log('✅ Payment saved to database');
-        }
-      } catch (dbError) {
-        console.error('Error saving to database:', dbError);
-        // Don't fail the whole transaction if database save fails
-      }
+      } catch { /* non-critical */ }
 
       alert('✅ Pet insurance premium paid successfully!');
       setPremiumAmount('');
-      setCurrentPage(1); // Reset to first page
+      setCurrentPage(1);
       fetchPoolBalance();
-      fetchPremiumPayments(); // Refresh payment history
+      fetchPremiumPayments();
     } catch (error: any) {
-      console.error('❌ Error paying premium:', error);
-      
       if (error.code === -32002 || error.message?.includes('RPC endpoint returned too many errors')) {
-        alert('⏰ The RPC endpoint is currently rate-limited. Please try again in a moment.');
+        alert('⏰ RPC endpoint is rate-limited. Please try again.');
       } else if (error.code === 'ACTION_REJECTED') {
         alert('Transaction cancelled by user');
       } else if (error.message?.includes('insufficient balance')) {
@@ -167,53 +111,28 @@ export default function Pool() {
     }
   };
 
-  // Handle Donation
   const handleDonate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!donationAmount || parseFloat(donationAmount) <= 0) {
-      alert('Please enter a valid donation amount');
-      return;
-    }
-
-    if (!signer) {
-      alert('Please connect your wallet first');
-      return;
-    }
+    if (!donationAmount || parseFloat(donationAmount) <= 0) { alert('Please enter a valid donation amount'); return; }
+    if (!signer) { alert('Please connect your wallet first'); return; }
 
     setLoading(true);
     try {
       const amount = ethers.parseEther(donationAmount);
-      console.log('🔄 Donating', donationAmount, 'GUARD to insurance pool...');
-
-      // First approve the pool contract
       const poolAddress = contracts.pawPool.target;
-      console.log('📝 Approving pool contract to spend GUARD tokens...');
-      console.log('Pool address:', poolAddress);
-      console.log('Amount to approve:', amount.toString());
-
       const guardWithSigner = contracts.guardToken.connect(signer);
       const approveTx = await guardWithSigner.approve(poolAddress, amount);
-      console.log('⏳ Waiting for approval transaction:', approveTx.hash);
       await approveTx.wait();
-      console.log('✅ Approval confirmed');
 
-      // Then donate to pool
-      console.log('📝 Donating to insurance pool...');
       const poolWithSigner = contracts.pawPool.connect(signer);
       const donateTx = await poolWithSigner.contributeToPool(amount);
-      console.log('⏳ Waiting for donation transaction:', donateTx.hash);
       await donateTx.wait();
-      console.log('✅ Donation confirmed');
 
       alert('🙏 Thank you for your donation to the insurance pool!');
       setDonationAmount('');
       fetchPoolBalance();
     } catch (error: any) {
-      console.error('❌ Error donating to pool:', error);
-      
-      if (error.code === -32002 || error.message?.includes('RPC endpoint returned too many errors')) {
-        alert('⏰ The RPC endpoint is currently rate-limited. Please try again in a moment.');
-      } else if (error.code === 'ACTION_REJECTED') {
+      if (error.code === 'ACTION_REJECTED') {
         alert('Transaction cancelled by user');
       } else if (error.message?.includes('insufficient balance')) {
         alert('❌ Insufficient GUARD token balance');
@@ -227,187 +146,225 @@ export default function Pool() {
 
   if (web3Loading) {
     return (
-      <div className="text-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Loading pool...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="relative w-16 h-16 mx-auto mb-4">
+            <div className="absolute inset-0 rounded-full border-2 border-bitcoin/20"></div>
+            <div className="absolute inset-0 rounded-full border-t-2 border-bitcoin animate-spin"></div>
+          </div>
+          <p className="font-mono text-xs tracking-widest text-muted uppercase">Loading Pool...</p>
+        </div>
       </div>
     );
   }
 
   if (!currentAccount) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-        <p className="text-red-600">Please connect your wallet to contribute to the pool.</p>
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="bg-surface border border-bitcoin/30 rounded-2xl p-8 text-center max-w-md shadow-glow-orange">
+          <div className="w-12 h-12 bg-bitcoin/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-bitcoin/40">
+            <svg className="w-6 h-6 text-bitcoin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0110 0v4"/>
+            </svg>
+          </div>
+          <h2 className="font-heading font-bold text-xl text-white mb-2">Wallet Required</h2>
+          <p className="text-muted text-sm">Connect your wallet to contribute to the pool.</p>
+        </div>
       </div>
     );
   }
 
-  return (
-    <div>
-      <h1 className="text-4xl font-bold text-foreground mb-6">Insurance Pool</h1>
+  const totalPages = Math.ceil(totalPayments / pageSize) || 1;
 
-      <div className="grid md:grid-cols-2 gap-6 mb-8">
-        <div className="bg-blue-50 rounded-lg shadow p-6">
-          <p className="text-sm text-gray-600">Total Pool Balance</p>
-          <p className="text-3xl font-bold text-blue-600 mt-2">
-            {parseFloat(poolBalance || '0').toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} GUARD
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      {/* Header */}
+      <div className="mb-10">
+        <p className="font-mono text-xs tracking-widest text-bitcoin uppercase mb-2">Protocol</p>
+        <h1 className="font-heading font-bold text-4xl md:text-5xl text-white">
+          Insurance <span className="bg-gradient-to-r from-bitcoin to-gold bg-clip-text text-transparent">Pool</span>
+        </h1>
+      </div>
+
+      {/* Pool Stats */}
+      <div className="grid md:grid-cols-2 gap-5 mb-10">
+        <div className="bg-surface border border-white/10 rounded-2xl p-6 hover:-translate-y-1 hover:border-bitcoin/50 hover:shadow-card-hover transition-all duration-300">
+          <p className="font-mono text-xs tracking-widest text-muted uppercase mb-3">Total Pool Balance</p>
+          <p className="font-heading font-bold text-4xl bg-gradient-to-r from-bitcoin to-gold bg-clip-text text-transparent">
+            {parseFloat(poolBalance || '0').toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
+          <p className="font-mono text-xs text-muted mt-2 tracking-wider">GUARD TOKENS</p>
         </div>
-        <div className="bg-green-50 rounded-lg shadow p-6">
-          <p className="text-sm text-gray-600">Pool Distribution</p>
-          <ul className="mt-2 space-y-1 text-sm text-gray-700">
-            <li>• 30% Immediate Payouts</li>
-            <li>• 60% Stable Yield</li>
-            <li>• 10% Risk Reserve</li>
-          </ul>
+
+        <div className="bg-surface border border-white/10 rounded-2xl p-6 hover:-translate-y-1 hover:border-bitcoin/50 hover:shadow-card-hover transition-all duration-300">
+          <p className="font-mono text-xs tracking-widest text-muted uppercase mb-3">Pool Distribution</p>
+          <div className="space-y-3 mt-2">
+            {[
+              { label: 'Immediate Payouts', pct: 30, color: 'from-bitcoin-dark to-bitcoin' },
+              { label: 'Stable Yield', pct: 60, color: 'from-gold/70 to-gold' },
+              { label: 'Risk Reserve', pct: 10, color: 'from-white/20 to-white/40' },
+            ].map(({ label, pct, color }) => (
+              <div key={label}>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-mono text-xs text-muted">{label}</span>
+                  <span className="font-mono text-xs text-white">{pct}%</span>
+                </div>
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div className={`h-full bg-gradient-to-r ${color} rounded-full`} style={{ width: `${pct}%` }}></div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Pay Premium Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-          <h2 className="text-2xl font-bold text-foreground mb-4">Pay Pet Insurance Premium</h2>
-          <p className="text-sm text-gray-600 mb-4">
-            Pay a premium for a specific pet's insurance coverage
-          </p>
-
-          <form onSubmit={handlePayPremium} className="space-y-4">
+      {/* Action Cards */}
+      <div className="grid md:grid-cols-2 gap-6 mb-10">
+        {/* Pay Premium */}
+        <div className="bg-surface border border-white/10 rounded-2xl p-8 hover:border-bitcoin/30 transition-all duration-300">
+          <div className="flex items-start gap-4 mb-6">
+            <div className="bg-bitcoin/20 border border-bitcoin/40 rounded-xl p-3 flex-shrink-0">
+              <svg className="w-5 h-5 text-bitcoin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+              </svg>
+            </div>
             <div>
-              <label htmlFor="petId" className="block text-sm font-medium text-gray-700 mb-1">
-                Pet ID
-              </label>
+              <h2 className="font-heading font-bold text-xl text-white">Pay Pet Insurance Premium</h2>
+              <p className="text-muted text-sm mt-1">Pay coverage premium for a specific pet</p>
+            </div>
+          </div>
+
+          <form onSubmit={handlePayPremium} className="space-y-6">
+            <div>
+              <label htmlFor="petId" className={labelClass}>Pet ID</label>
               <input
-                type="number"
-                id="petId"
-                min="1"
-                value={petId}
+                type="number" id="petId" min="1" value={petId}
                 onChange={(e) => setPetId(e.target.value)}
-                placeholder="Enter your pet ID"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
+                placeholder="Enter your pet ID" className={inputClass} required
               />
-              <p className="text-xs text-gray-500 mt-1">The ID of the pet you want to insure</p>
+              <p className="font-mono text-xs text-muted mt-2">The ID of the pet you want to insure</p>
             </div>
-
             <div>
-              <label htmlFor="premiumAmount" className="block text-sm font-medium text-gray-700 mb-1">
-                Premium Amount (GUARD)
-              </label>
+              <label htmlFor="premiumAmount" className={labelClass}>Premium Amount (GUARD)</label>
               <input
-                type="text"
-                id="premiumAmount"
-                value={premiumAmount}
+                type="text" id="premiumAmount" value={premiumAmount}
                 onChange={(e) => setPremiumAmount(e.target.value)}
-                placeholder="Enter amount in GUARD tokens"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
+                placeholder="0.00" className={inputClass} required
               />
             </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400"
-            >
-              {loading ? 'Processing...' : 'Pay Premium'}
+            <button type="submit" disabled={loading} className={primaryBtn}>
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-t-2 border-white rounded-full animate-spin"></div>
+                  Processing...
+                </span>
+              ) : 'Pay Premium'}
             </button>
           </form>
 
-          <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <p className="text-sm text-blue-700">
+          <div className="mt-5 p-4 bg-bitcoin/5 border border-bitcoin/20 rounded-xl">
+            <p className="font-mono text-xs text-muted">
               Your premium is tracked with your pet ID and goes into the insurance pool.
             </p>
           </div>
         </div>
 
-        {/* Donate Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-          <h2 className="text-2xl font-bold text-foreground mb-4">Donate to Pool</h2>
-          <p className="text-sm text-gray-600 mb-4">
-            Make a general donation to support the entire insurance pool
-          </p>
-
-          <form onSubmit={handleDonate} className="space-y-4">
+        {/* Donate */}
+        <div className="bg-surface border border-white/10 rounded-2xl p-8 hover:border-bitcoin/30 transition-all duration-300">
+          <div className="flex items-start gap-4 mb-6">
+            <div className="bg-gold/20 border border-gold/40 rounded-xl p-3 flex-shrink-0">
+              <svg className="w-5 h-5 text-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+              </svg>
+            </div>
             <div>
-              <label htmlFor="donationAmount" className="block text-sm font-medium text-gray-700 mb-1">
-                Donation Amount (GUARD)
-              </label>
+              <h2 className="font-heading font-bold text-xl text-white">Donate to Pool</h2>
+              <p className="text-muted text-sm mt-1">Support the entire insurance pool community</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleDonate} className="space-y-6">
+            <div>
+              <label htmlFor="donationAmount" className={labelClass}>Donation Amount (GUARD)</label>
               <input
-                type="text"
-                id="donationAmount"
-                value={donationAmount}
+                type="text" id="donationAmount" value={donationAmount}
                 onChange={(e) => setDonationAmount(e.target.value)}
-                placeholder="Enter amount in GUARD tokens"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                required
+                placeholder="0.00" className={inputClass} required
               />
             </div>
-
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition disabled:bg-gray-400"
+              type="submit" disabled={loading}
+              className="w-full bg-gradient-to-r from-gold/80 to-gold text-black font-mono font-semibold tracking-wider uppercase h-12 rounded-full shadow-glow-gold hover:scale-[1.02] transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
-              {loading ? 'Processing...' : 'Donate'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-t-2 border-black rounded-full animate-spin"></div>
+                  Processing...
+                </span>
+              ) : 'Donate to Pool'}
             </button>
           </form>
 
-          <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
-            <p className="text-sm text-green-700">
+          <div className="mt-5 p-4 bg-gold/5 border border-gold/20 rounded-xl">
+            <p className="font-mono text-xs text-muted">
               Your donation helps fund the entire insurance pool without being tied to a specific pet.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Premium Payment History Section */}
-      <div className="mt-8">
-        <h2 className="text-2xl font-bold text-foreground mb-4">My Premium Payment History</h2>
+      {/* Payment History */}
+      <div className="bg-surface border border-white/10 rounded-2xl overflow-hidden">
+        <div className="p-8 border-b border-white/10">
+          <h2 className="font-heading font-bold text-2xl text-white">Premium Payment History</h2>
+          <p className="text-muted text-sm mt-1">{totalPayments} total payments</p>
+        </div>
 
         {premiumPayments.length === 0 ? (
-          <div className="bg-gray-50 rounded-lg shadow p-6 text-center">
-            <p className="text-gray-600">No premium payments yet.</p>
+          <div className="py-16 text-center">
+            <svg className="w-12 h-12 mx-auto mb-4 text-white/20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+            </svg>
+            <p className="font-heading font-semibold text-white mb-1">No payments yet</p>
+            <p className="text-muted text-sm">Your premium payment history will appear here.</p>
           </div>
         ) : (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+          <>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 dark:bg-gray-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Pet ID
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Amount (GUARD)
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Date
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Transaction
-                    </th>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    {['Pet ID', 'Amount (GUARD)', 'Date', 'Transaction'].map((h) => (
+                      <th key={h} className="px-6 py-4 text-left font-mono text-xs tracking-widest text-muted uppercase">
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
-                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200">
+                <tbody className="divide-y divide-white/5">
                   {premiumPayments.map((payment) => (
-                    <tr key={payment.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
-                        #{payment.pet_id}
+                    <tr key={payment.id} className="hover:bg-white/5 transition-colors duration-150 group">
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm text-bitcoin">#{payment.pet_id}</span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                        {parseFloat(payment.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm text-white">
+                          {parseFloat(payment.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {new Date(payment.created_at).toLocaleString()}
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-xs text-muted">
+                          {new Date(payment.created_at).toLocaleString()}
+                        </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-blue-600 dark:text-blue-400">
+                      <td className="px-6 py-4">
                         <a
                           href={getTransactionUrl(payment.transaction_hash)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline"
+                          target="_blank" rel="noopener noreferrer"
+                          className="font-mono text-xs text-bitcoin hover:text-gold hover:underline transition-colors duration-150"
                         >
-                          {payment.transaction_hash.slice(0, 10)}...{payment.transaction_hash.slice(-8)}
+                          {payment.transaction_hash.slice(0, 8)}...{payment.transaction_hash.slice(-6)}
                         </a>
                       </td>
                     </tr>
@@ -416,73 +373,42 @@ export default function Pool() {
               </table>
             </div>
 
-            {/* Pagination Controls */}
-            <div className="bg-gray-50 dark:bg-gray-700 px-6 py-4 flex items-center justify-between border-t border-gray-200">
-              <div className="flex items-center space-x-2">
-                <label htmlFor="pageSize" className="text-sm text-gray-700 dark:text-gray-300">
-                  Show:
-                </label>
+            {/* Pagination */}
+            <div className="px-6 py-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <label htmlFor="pageSize" className="font-mono text-xs text-muted uppercase tracking-wider">Show</label>
                 <select
-                  id="pageSize"
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(parseInt(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  id="pageSize" value={pageSize}
+                  onChange={(e) => { setPageSize(parseInt(e.target.value)); setCurrentPage(1); }}
+                  className="bg-black/50 border border-white/10 text-white font-mono text-xs px-3 py-1.5 rounded-lg focus:border-bitcoin focus:outline-none"
                 >
-                  <option value="5">5</option>
-                  <option value="10">10</option>
-                  <option value="20">20</option>
-                  <option value="50">50</option>
+                  {[5, 10, 20, 50].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  per page
-                </span>
+                <span className="font-mono text-xs text-muted">per page</span>
               </div>
 
-              <div className="flex items-center space-x-4">
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Showing {premiumPayments.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to{' '}
-                  {Math.min(currentPage * pageSize, totalPayments)} of {totalPayments} payments
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-xs text-muted">
+                  {premiumPayments.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalPayments)} of {totalPayments}
                 </span>
-
-                <div className="flex space-x-2">
-                  <button
-                    onClick={() => setCurrentPage(1)}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    First
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(currentPage - 1)}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Previous
-                  </button>
-                  <span className="px-3 py-1 text-sm text-gray-700 dark:text-gray-300">
-                    Page {currentPage} of {Math.ceil(totalPayments / pageSize) || 1}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(currentPage + 1)}
-                    disabled={currentPage >= Math.ceil(totalPayments / pageSize)}
-                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Next
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(Math.ceil(totalPayments / pageSize))}
-                    disabled={currentPage >= Math.ceil(totalPayments / pageSize)}
-                    className="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Last
-                  </button>
+                <div className="flex gap-1">
+                  {[
+                    { label: '«', action: () => setCurrentPage(1), disabled: currentPage === 1 },
+                    { label: '‹', action: () => setCurrentPage(currentPage - 1), disabled: currentPage === 1 },
+                    { label: '›', action: () => setCurrentPage(currentPage + 1), disabled: currentPage >= totalPages },
+                    { label: '»', action: () => setCurrentPage(totalPages), disabled: currentPage >= totalPages },
+                  ].map(({ label, action, disabled }) => (
+                    <button
+                      key={label} onClick={action} disabled={disabled}
+                      className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 hover:border-bitcoin/50 hover:text-bitcoin font-mono text-xs text-muted transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>
